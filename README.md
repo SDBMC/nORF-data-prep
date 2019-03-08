@@ -8,6 +8,7 @@ git clone https://github.com/PrabakaranGroup/nORF-data-prep.git
 ```
 2. R with the following packages installed:
 * tidyverse
+* Biostrings
 
 ## Processing OpenProt
 
