@@ -4,7 +4,7 @@ The following is a command-line walkthrough for processing [OpenProt](http://www
 ## Prerequisites
 1. Clone this repository
 ```
-git clone https://github.com/mattnev17/nORF-preparation.git
+git clone https://github.com/PrabakaranGroup/nORF-preparation.git
 ```
 2. R with the following packages installed:
 * tidyverse
