@@ -1,4 +1,4 @@
-# nORF-preparation
+# nORF-data-prep
 The following is a command-line walkthrough for processing [OpenProt](http://www.openprot.org/) ([Brunet et al., 2018](https://doi.org/10.1093/nar/gky936)) and [sorfs.org](http://www.sorfs.org/) ([Olexiouk et al., 2018](https://doi.org/10.1093/nar/gkx1130)) human novel open reading frame (nORF) databases into lab usable formats.
 
 ## Prerequisites
