@@ -63,7 +63,7 @@ bed12 <- tibble(
   chrom = paste0("chr", sorfsJoined$Chromosome),
   chromStart = sorfsJoined$`Sorf start` - 1,
   chromStop = sorfsJoined$`Sorf end`,
-  name = sorfsJoined$`Sorf ID`,
+  name =   name = gsub(":", "_", sorfsJoined$`Sorf ID`),
   score = "0",
   strand = gsub("1", "+", gsub("-1", "-", sorfsJoined$Strand)),
   thickStart = sorfsJoined$`Sorf start` - 1,
