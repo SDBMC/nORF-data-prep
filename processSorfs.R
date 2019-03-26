@@ -66,7 +66,7 @@ sorfsPlus <- sorfsSpliceFormatted %>%
 
 sorfsMinus <- sorfsSpliceFormatted %>% 
   filter(Strand == '-1') %>% 
-  arrange(Chromosome, `Sorf start`, `Sorf end`) %>%
+  arrange(Chromosome, `Sorf start`, -`Sorf end`) %>%
   distinct(Chromosome,  `Sorf start`, blockCount, .keep_all = T)
 
 sorfsJoined <- bind_rows(sorfsPlus, sorfsMinus) %>% 
