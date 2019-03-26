@@ -13,9 +13,9 @@ library(tidyverse)
 
 #Read in TXT file
 if (massSpec) {
-  rawFile <- read_tsv("sorfsDownload_MS.txt")
+  rawFile <- read_tsv("sorfsDownload_MS.txt", col_types = 'cciiccciccccccc')
 } else {
-  rawFile <- read_tsv("sorfsDownload.txt")
+  rawFile <- read_tsv("sorfsDownload.txt", col_types = 'cciicccicccccc')
 }
 #Remove duplicates based on identical Chr, start, stop, strand, AND AAseq
 rawFile <- rawFile %>%
@@ -55,15 +55,29 @@ spliced <- spliced %>%
          blockStarts = apply(spliced, 1, blockStarter))
 
 #Join back together
-sorfsJoined <- rbind(noSplice, spliced)
+sorfsSpliceFormatted <- rbind(noSplice, spliced)
 
+#Deal with similar sorfs by selecting longest when having the same end site + splice count
+
+sorfsPlus <- sorfsSpliceFormatted %>%
+  filter(Strand == '1') %>% 
+  arrange(Chromosome,`Sorf end`, `Sorf start`) %>%
+  distinct(Chromosome,`Sorf end`, blockCount, .keep_all = T)
+
+sorfsMinus <- sorfsSpliceFormatted %>% 
+  filter(Strand == '-1') %>% 
+  arrange(Chromosome, `Sorf start`, `Sorf end`) %>%
+  distinct(Chromosome,  `Sorf start`, blockCount, .keep_all = T)
+
+sorfsJoined <- bind_rows(sorfsPlus, sorfsMinus) %>% 
+  arrange(Chromosome, `Sorf start`, `Sorf end`)
 
 #Convert to bed12 format
 bed12 <- tibble(
   chrom = paste0("chr", sorfsJoined$Chromosome),
   chromStart = sorfsJoined$`Sorf start` - 1,
   chromStop = sorfsJoined$`Sorf end`,
-  name =   name = gsub(":", "_", sorfsJoined$`Sorf ID`),
+  name = gsub(":", "_", sorfsJoined$`Sorf ID`),
   score = "0",
   strand = gsub("1", "+", gsub("-1", "-", sorfsJoined$Strand)),
   thickStart = sorfsJoined$`Sorf start` - 1,
@@ -86,7 +100,7 @@ gtfFile <- tibble(
   end = sorfsJoined$`Sorf end`,
   score = ".",
   strand = gsub("1", "+", gsub("-1", "-", sorfsJoined$Strand)),
-  frame = "0",
+  frame = ".",
   attributes = paste0('gene_id "', sorfsJoined$`Sorf ID`,'"; transcript_id "', sorfsJoined$`Ensembl transcript ID`, 
                       '" transcript_sequence "', sorfsJoined$`Transcript sequence`,'"; AA_seq "', sorfsJoined$`AA-sequence`,
                       '"; start_codon "', sorfsJoined$`Start codon`, '"; sorf_length "', sorfsJoined$`Sorf length`,
