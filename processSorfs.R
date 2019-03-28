@@ -20,7 +20,8 @@ if (massSpec) {
 #Remove duplicates based on identical Chr, start, stop, strand, AND AAseq
 rawFile <- rawFile %>%
   distinct(Chromosome, `Sorf start`, `Sorf end`, Strand, `AA-sequence` , .keep_all = TRUE) %>%
-  filter(`Sorf start` >= 0)
+  filter(`Sorf start` >= 0) %>% 
+  mutate(`AA-sequence` = str_remove(`AA-sequence`, "\\*"))
 
 #Convert splice info from sorfs.org into usable bed12 format
 #First deal with simple no splice cases
@@ -102,9 +103,9 @@ gtfFile <- tibble(
   strand = gsub("1", "+", gsub("-1", "-", sorfsJoined$Strand)),
   frame = ".",
   attributes = paste0('gene_id "', sorfsJoined$`Sorf ID`,'"; transcript_id "', sorfsJoined$`Ensembl transcript ID`, 
-                      '" transcript_sequence "', sorfsJoined$`Transcript sequence`,'"; AA_seq "', sorfsJoined$`AA-sequence`,
+                      '"; transcript_sequence "', sorfsJoined$`Transcript sequence`,'"; AA_seq "', sorfsJoined$`AA-sequence`,
                       '"; start_codon "', sorfsJoined$`Start codon`, '"; sorf_length "', sorfsJoined$`Sorf length`,
-                      '"; annotation "', sorfsJoined$Annotation, '"; biotype "', sorfsJoined$Biotype,'"' ))
+                      '"; annotation "', sorfsJoined$Annotation, '"; biotype "', sorfsJoined$Biotype,'";' ))
 
 #Write out bed and gtf files
 if (massSpec) {
