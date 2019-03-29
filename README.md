@@ -76,16 +76,16 @@ Specifically, this script will:
 Rscript processDatasets.R openprot
 
 #OpenProt with 2+ peptides of mass-spec evidence
-Rscript processOpenProt.R openprot2pep
+Rscript processDatasets.R openprot2pep
 
 #sorfs.org all unique entries
-Rscript processOpenProt.R sorfs
+Rscript processDatasets.R sorfs
 
 #sorfs.org subsetted to entries with mass-spec evidence
-Rscript processOpenProt.R sorfsMS
+Rscript processDatasets.R sorfsMS
 
 #Combined sorfs + openprot
-Rscript processOpenProt.R all
+Rscript processDatasets.R all
 
 ```
 
