@@ -1,5 +1,5 @@
 # nORF-data-prep
-The following is a command-line walkthrough for processing [OpenProt](http://www.openprot.org/) ([Brunet et al., 2018](https://doi.org/10.1093/nar/gky936)) and [sorfs.org](http://www.sorfs.org/) ([Olexiouk et al., 2018](https://doi.org/10.1093/nar/gkx1130)) human novel open reading frame (nORF) databases into lab usable formats.
+The following is a command-line walkthrough for processing [OpenProt](http://www.openprot.org/) ([Brunet et al., 2018](https://doi.org/10.1093/nar/gky936)) and [sorfs.org](http://www.sorfs.org/) ([Olexiouk et al., 2018](https://doi.org/10.1093/nar/gkx1130)) into a human novel open reading frame (nORF) dataset.
 
 ## Prerequisites
 1. Clone this repository
@@ -18,33 +18,33 @@ The code below downloads files with the following parameters from OpenProt (http
 * Release: 1.3
 * Species: Homo Sapiens
 * Assembly: GRCg38.p5
-* Protein Type: AltProts, Isoforms and Refprots
-* Annotation: Ensembl (GRCh38.83) + RefSeq (GRCh38.p7) + UniProt (2017-09-27)
+* Protein Type: AltProts and Isoforms
+* Annotation: Ensembl (GRCh38.83)
 
 Download, unzip, and rename the 'All predicted' `.tsv`, `.bed`, `.dna.fasta`, and `.fasta` files:
 ```
 #TSV file
-wget http://www.openprot.org/download/files/1.3/human-openprot-r1_3-refprots+altprots+isoforms-grch38.83+grch38.p7+uniprot2017_09_27.tsv.zip
-unzip human-openprot-r1_3-refprots+altprots+isoforms-grch38.83+grch38.p7+uniprot2017_09_27.tsv.zip
-mv human-openprot-r1_3-refprots+altprots+isoforms-grch38.83+grch38.p7+uniprot2017_09_27.tsv openProtAllPredicted.tsv
+wget http://www.openprot.org/download/files/1.3/human-openprot-r1_3-altprots+isoforms-grch38.83.tsv.zip
+unzip human-openprot-r1_3-altprots+isoforms-grch38.83.tsv.zip
+mv human-openprot-r1_3-altprots+isoforms-grch38.83.tsv openProtAllPredicted.tsv
 
 #BED file
-wget http://www.openprot.org/download/files/1.3/human-openprot-r1_3-refprots+altprots+isoforms-grch38.83+grch38.p7.bed.zip
-unzip human-openprot-r1_3-refprots+altprots+isoforms-grch38.83+grch38.p7.bed.zip
-mv human-openprot-r1_3-refprots+altprots+isoforms-grch38.83+grch38.p7.bed openProtAllPredicted_38.bed
+wget http://www.openprot.org/download/files/1.3/human-openprot-r1_3-altprots+isoforms-grch38.83.bed.zip
+unzip human-openprot-r1_3-altprots+isoforms-grch38.83.bed.zip
+mv human-openprot-r1_3-altprots+isoforms-grch38.83.bed openProtAllPredicted_38.bed
 
 #DNA FASTA file
-wget http://www.openprot.org/download/files/1.3/human-openprot-r1_3-refprots+altprots+isoforms-grch38.83+grch38.p7.dna.fasta.zip
-unzip human-openprot-r1_3-refprots+altprots+isoforms-grch38.83+grch38.p7.dna.fasta.zip
-mv human-openprot-r1_3-refprots+altprots+isoforms-grch38.83+grch38.p7.dna.fasta openProtAllPredicted_38.dna.fasta
+wget http://www.openprot.org/download/files/1.3/human-openprot-r1_3-altprots+isoforms-grch38.83.dna.fasta.zip
+unzip human-openprot-r1_3-altprots+isoforms-grch38.83.dna.fasta.zip
+mv human-openprot-r1_3-altprots+isoforms-grch38.83.dna.fasta openProtAllPredicted_38.dna.fasta
 
 #Protein FASTA file
-wget http://www.openprot.org/download/files/1.3/human-openprot-r1_3-refprots+altprots+isoforms-grch38.83+grch38.p7+uniprot2017_09_27.fasta.zip
-unzip human-openprot-r1_3-refprots+altprots+isoforms-grch38.83+grch38.p7+uniprot2017_09_27.fasta.zip
-mv human-openprot-r1_3-refprots+altprots+isoforms-grch38.83+grch38.p7+uniprot2017_09_27.fasta openProtAllPredicted_38.fasta
+wget http://www.openprot.org/download/files/1.3/human-openprot-r1_3-altprots+isoforms-grch38.83.fasta.zip
+unzip human-openprot-r1_3-altprots+isoforms-grch38.83.fasta.zip
+mv human-openprot-r1_3-altprots+isoforms-grch38.83.fasta openProtAllPredicted_38.fasta
 
 #Clean up
-rm human-openprot-r1_3-refprots+altprots+isoforms*
+rm rm human-openprot-r1_3-altprots+isoforms-grch38.83.*
 ```
 
 #### Step 2: Download sorfs.org entries
