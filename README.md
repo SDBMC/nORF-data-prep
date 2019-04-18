@@ -33,18 +33,13 @@ wget http://www.openprot.org/download/files/1.3/human-openprot-r1_3-altprots+iso
 unzip human-openprot-r1_3-altprots+isoforms-grch38.83.bed.zip
 mv human-openprot-r1_3-altprots+isoforms-grch38.83.bed openProtAllPredicted_38.bed
 
-#DNA FASTA file
-wget http://www.openprot.org/download/files/1.3/human-openprot-r1_3-altprots+isoforms-grch38.83.dna.fasta.zip
-unzip human-openprot-r1_3-altprots+isoforms-grch38.83.dna.fasta.zip
-mv human-openprot-r1_3-altprots+isoforms-grch38.83.dna.fasta openProtAllPredicted_38.dna.fasta
-
 #Protein FASTA file
 wget http://www.openprot.org/download/files/1.3/human-openprot-r1_3-altprots+isoforms-grch38.83.fasta.zip
 unzip human-openprot-r1_3-altprots+isoforms-grch38.83.fasta.zip
 mv human-openprot-r1_3-altprots+isoforms-grch38.83.fasta openProtAllPredicted_38.fasta
 
 #Clean up
-rm rm human-openprot-r1_3-altprots+isoforms-grch38.83.*
+rm human-openprot-r1_3-altprots+isoforms-grch38.83.*
 ```
 
 #### Step 2: Download sorfs.org entries
