@@ -13,6 +13,7 @@ git clone https://github.com/PrabakaranGroup/nORF-data-prep.git
 * rtracklayer
 * GenomicFeatures
 * Guitar
+3. Install [BedTools](https://bedtools.readthedocs.io/en/latest/content/installation.html) 
 
 ## Download Files
 
@@ -40,6 +41,15 @@ The code below downloads files with the following parameters from sorfs.org (htt
 ```
 wget -O sorfsDownload.txt 'http://biomart.biobix.be/martservice/results?query=<!DOCTYPE Query><Query client="true" processor="TSV" limit="-1" header="1"><Dataset name="BioMart" config="Human"><Filter name="human__classification_104" value="Extreme,Good" filter_list=""/><Attribute name="human__sorf_id_104"/><Attribute name="human__chr_104"/><Attribute name="human__sorf_begin_104"/><Attribute name="human__sorf_end_104"/><Attribute name="human__strand_104"/><Attribute name="human__start_parts_104"/><Attribute name="human__stop_parts_104"/><Attribute name="human__sorf_length_104"/><Attribute name="human__start_codon_104"/><Attribute name="human__aa_seq_104"/><Attribute name="human__biotype_104"/><Attribute name="human__annotation_104"/><Attribute name="human__id_104"/><Attribute name="human__tr_seq_104"/></Dataset></Query>'
 ```
+#### Step 3: Download ensembl GFF file for annotation
+
+This code downloads the ensembl `.gff` file for classifying the novel ORFs:
+```
+#Download and unzip GFF3 file
+wget ftp://ftp.ensembl.org/pub/release-96/gff3/homo_sapiens/Homo_sapiens.GRCh38.96.gff3.gz
+gunzip Homo_sapiens.GRCh38.96.gff3.gz
+```
+
 
 ## Process Files
 
@@ -58,6 +68,8 @@ Rscript processDatasets.R all
 
 This script classifies the combined OpenProt and sorfs.org entries by their transcript type/relation to enannotated protein coding regions.
 ```
+#Create bed6 file
+bedtools bed12tobed6 -i all_38.bed > all_38.6.bed
 #Combined sorfs + openprot
 Rscript classifynORFsCode.R
 ```
