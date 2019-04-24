@@ -58,4 +58,9 @@ annotationClasses <- groupClasses()
 
 #Classify in full detail
 annotationMaster <- classify_nORFs(annotationTibble = annotationClasses, txdbInput = refseq)
+annotationMasterFiltered <- annotationMaster %>% 
+  mutate(codingRegion = ifelse(transcriptClass == "protein_coding" | transcriptClass == "intronic_codingTranscript" , T, F)) %>% 
+  mutate(codingRegion = ifelse(transcriptClass == "intergenic", F, codingRegion)) %>% 
+  dplyr::select(-transcriptClass) %>% 
+  arrange(novelORF_ID)
 write_tsv(annotationMasterFiltered, "nORF_refseqClassification.tsv")
