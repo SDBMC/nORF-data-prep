@@ -264,7 +264,7 @@ generateInFrameIDs <- function(gffFile, bed6File, txdb) {
     #If exon has start_phase -1 then shift based on end phase
     #Else shift based on start phase
     mutate(exonFrame = ifelse(start_phase == "-1", (exonEnd - as.integer(end_phase) + 1) %% 3, (exonStart - as.integer(start_phase)) %% 3)) %>% 
-    filter(exonFrame == norfFrame) #%>% 
+    filter(exonFrame == norfFrame) %>% 
     distinct(norf_ID)
   
   inFrameNorfsMinus <- inFrameTibble %>% 
