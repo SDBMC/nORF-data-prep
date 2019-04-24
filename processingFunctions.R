@@ -166,14 +166,14 @@ combineNovelORFs <- function(sorfs,openprot) {
 }
 
 addIDs <- function(novelORFtable) {
-  idKey <- read_csv("annotation_w_coordinates.csv", col_types = 'cccccccccccc')  %>% 
-    mutate(mergeKey = str_c(V2,V3, c.original)) %>% 
-    dplyr::select(mergeKey, V6)
+  idKey <- readRDS("nORFsDB1.1.rds") %>% 
+    mutate(mergeKey = str_c(start, end, name)) %>% 
+    dplyr::select(mergeKey, id)
   novelORFtableMerge <- novelORFtable %>% 
     mutate(mergeKey = str_c((chromStart +1),chromStop, name)) %>% 
     left_join(idKey, by = "mergeKey") %>% 
-    mutate(name = V6) %>% 
-    dplyr::select(-V6, mergeKey) %>% 
+    mutate(name = id) %>% 
+    dplyr::select(-id, mergeKey) %>% 
     filter(!(is.na(name)))
   return(novelORFtableMerge)
 }
