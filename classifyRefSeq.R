@@ -1,4 +1,5 @@
 #!/usr/bin/env Rscript
+
 library(tidyverse)
 library(GenomicRanges)
 library(rtracklayer)
@@ -21,7 +22,7 @@ novelORFs <- BED12toGRangesList("openprotRefseq_38.bed")
 novelORFs <- renameSeqlevels(novelORFs, gsub("chr","", seqlevels(novelORFs)))
 novelORFs <- keepStandardChromosomes(novelORFs)
 
-transcriptTypes <- tibble(transcript_ID = exons@partitioning@NAMES, transcriptBiotype = NA) %>% 
+transcriptTypes <- tibble(transcript_ID = exonsByTranscript@partitioning@NAMES, transcriptBiotype = NA) %>% 
   mutate(transcriptBiotype = ifelse(str_detect(transcript_ID, "NM_"), "protein_coding", transcriptBiotype)) %>% 
   mutate(transcriptBiotype = ifelse(str_detect(transcript_ID, "NR_"), "ncRNA", transcriptBiotype))
 
@@ -53,10 +54,8 @@ nonCodingIntrons <- intronsByTranscript[intronsByTranscript@partitioning@NAMES %
 #5. Within an intron of protein coding transcript
 #6. Within an intron of non-coding transcript
 #7. None of 1-3 (intergenic)
-annotationClasses <- groupClasses(exonsByTranscript = exons, intronsByTranscript = introns)
+annotationClasses <- groupClasses()
 
 #Classify in full detail
 annotationMaster <- classify_nORFs(annotationTibble = annotationClasses, txdbInput = refseq)
-
-
-
+write_tsv(annotationMasterFiltered, "nORF_refseqClassification.tsv")
