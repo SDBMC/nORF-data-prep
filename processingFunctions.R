@@ -2,29 +2,42 @@
 
 #Functions for processing sorfs and openProt datasets
 
-processOpenProt <- function(dataset = "openprot") {
-  #Read in BED, FASTA, and TSV files
-  bedFile <- read_tsv("openProtAllPredicted_38.bed", col_names = c("chrom", "chromStart", "chromStop", "name", "score", 
-                                                                   "strand", "thickStart", "thickEnd", "itemRgb", 
-                                                                   "blockCount","blockSizes", "blockStarts"), 
-                      col_types = "ciiciciicicc")
+processOpenProt <- function(annotation) {
+  #Read in BED, FASTA, and TSV files based on ensembl or refseq
   
-  tsvFile <- read_tsv("openProtAllPredicted.tsv", skip = 1, col_types = "ccciddicciicccciiddcccd")
-  proteinFasta <- readAAStringSet("openProtAllPredicted_38.fasta") 
+  if (annotation == "ensembl") {
+    bedFile <- read_tsv("ensemblOpenProtAllPredicted_38.bed", 
+                        col_names = c("chrom", "chromStart", "chromStop", "name", "score", 
+                        "strand", "thickStart", "thickEnd", "itemRgb", "blockCount","blockSizes", "blockStarts"), 
+                        col_types = "ciiciciicicc") %>% 
+      #Remove a bugged entry
+      filter(name != "IP_296985" | chrom != "chrY")
+    
+    tsvFile <- read_tsv("ensemblOpenProtAllPredicted.tsv", skip = 1, col_types = "ccciddicciicccciiddcccd")
+    proteinFasta <- readAAStringSet("ensemblOpenProtAllPredicted_38.fasta") 
+  } else if (annotation == "refseq") {
+    
+    bedFile <- read_tsv("refseqOpenProtAllPredicted_38.bed", 
+                        col_names = c("chrom", "chromStart", "chromStop", "name", "score", 
+                        "strand", "thickStart", "thickEnd", "itemRgb", "blockCount","blockSizes", "blockStarts"), 
+                        col_types = "ciiciciicicc") 
+    
+    tsvFile <- read_tsv("refseqOpenProtAllPredicted.tsv", skip = 1, col_types = "ccciddicciicccciiddcccd")
+    proteinFasta <- readAAStringSet("refseqOpenProtAllPredicted_38.fasta")     
+      
+    
+  }
   
-  #Get IDs for subsets of interest: 2peptide and any evidence
+
+  
+  #Get IDs for subsets of interest
   #Also filters out some altProts that are isoforms on other transcripts and therefore unlikely to be true nORFs
   
-  IDalt2peptide <- tsvFile %>% 
-    filter(`protein type` == "AltProt" & `MS score` > 1) %>% 
-    filter(!grepl('II', `protein accession (others)`)) %>% 
-    select(`protein accession numbers`) %>% 
-    distinct()
   IDaltEvidence <- tsvFile %>% 
     filter(`protein type` == "AltProt" & (`MS score` != 0 | `TE score` != 0)) %>% 
     filter(!grepl('II', `protein accession (others)`)) %>% 
-    select(`protein accession numbers`) %>% 
-    distinct() 
+    dplyr::select(`protein accession numbers`) %>% 
+    distinct()
   
   #Dataframe with AA seq
   dfp <- data.frame(str_split(names(proteinFasta), "\\|", simplify = T)[,1], paste(proteinFasta))
@@ -39,11 +52,6 @@ processOpenProt <- function(dataset = "openprot") {
   openProtTable <- openProtTable %>% 
     mutate(length = str_length(aaSeq))
   
-  #Filter further if 2 peptide option chosen
-  if (dataset == "openprot2pep") {
-    openProtTable <- openProtTable %>% 
-      filter(name %in% IDalt2peptide$`protein accession numbers`)
-  }
   return(openProtTable)
 }
 
@@ -155,6 +163,19 @@ combineNovelORFs <- function(sorfs,openprot) {
   strandsJoined <- bind_rows(plusStrand, minusStrand) %>% 
     arrange(chrom, chromStart, chromStop)
   return(strandsJoined)
+}
+
+addIDs <- function(novelORFtable) {
+  idKey <- read_csv("annotation_w_coordinates.csv", col_types = 'cccccccccccc')  %>% 
+    mutate(mergeKey = str_c(V2,V3, c.original)) %>% 
+    dplyr::select(mergeKey, V6)
+  novelORFtableMerge <- novelORFtable %>% 
+    mutate(mergeKey = str_c((chromStart +1),chromStop, name)) %>% 
+    left_join(idKey, by = "mergeKey") %>% 
+    mutate(name = V6) %>% 
+    dplyr::select(-V6, mergeKey) %>% 
+    filter(!(is.na(name)))
+  return(novelORFtableMerge)
 }
 
 createBed12 <- function(novelORFtable) {
