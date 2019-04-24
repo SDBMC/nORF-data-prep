@@ -1,5 +1,4 @@
 #!/usr/bin/env Rscript
-setwd("~/Documents/MATT/Cambridge/PrabLab/nORF-Preparation")
 
 library(tidyverse)
 library(GenomicRanges)
@@ -25,18 +24,13 @@ novelORFs <- renameSeqlevels(novelORFs, gsub("chr","", seqlevels(novelORFs)))
 
 
 #3.Load in transcript biotypes file
-#In process group IG and TR genes into protein coding
-#Reannotate a few misclassified transcripts
+#In process group IG and TR genes into protein coding and re-annotate a few misclassified transcripts
+#Note that transcriptTypes.txt file was generated for the ensembl biomart page with the follwing parameters:
+  #Ensembl Genes 96, Dataset: Human genes(GRCh38.p12), Attributes: Transcript stable ID + Transcript type, Unique results only
 proteinCodingBiotypes <- c("protein_coding","IG_C_gene", "IG_D_gene", "IG_J_gene", "IG_V_gene",
                            "TR_C_gene", "TR_D_gene", "TR_J_gene", "TR_V_gene")
 transcriptTypes <- read_tsv("transcriptTypes.txt", col_names = c("transcript_ID", "transcriptBiotype"), skip = 1, col_types = "cc") %>% 
-  mutate(transcriptBiotype = ifelse(transcriptBiotype %in% proteinCodingBiotypes, 'protein_coding', transcriptBiotype)) %>% 
-  mutate(transcriptBiotype = ifelse(transcript_ID == "ENST00000468043" | transcript_ID == "ENST00000509948", 'processed_transcript', transcriptBiotype)) %>% 
-  mutate(transcriptBiotype = ifelse(transcript_ID == "ENST00000381489" , 'lincRNA', transcriptBiotype)) %>% 
-  mutate(transcriptBiotype = ifelse(transcript_ID == "ENST00000381072" , 'retained_intron', transcriptBiotype))
-  
-  
-  
+  mutate(transcriptBiotype = ifelse(transcriptBiotype %in% proteinCodingBiotypes, 'protein_coding', transcriptBiotype)) 
 
 
 ##### Set priority ranks for coding and non-coding annotations
@@ -80,8 +74,13 @@ annotationClasses <- groupClasses()
 #Classify in full detail
 annotationMaster <- classify_nORFs(annotationTibble = annotationClasses, txdbInput = human)
 
-#Remove the in-frame novel ORFs
+#Label as protein coding T/F and in-frame with protein coding T/F
 inFrameIDs <- generateInFrameIDs(gffFile = "Homo_sapiens.GRCh38.96.gff3", bed6File = "all_38.6.bed", txdb = human)
 annotationMasterFiltered <- annotationMaster %>% 
-  filter((novelORF_ID %in% inFrameIDs$norf_ID ))
-
+  mutate(inFrame = ifelse(novelORF_ID %in% inFrameIDs$norf_ID, T, F)) %>% 
+  mutate(codingRegion = ifelse(transcriptClass == "protein_coding" | transcriptClass == "intronic_codingTranscript" |
+                                        transcriptBiotype == "nonsense_mediated_decay" | transcriptBiotype == "retained_intron", T, F)) %>% 
+  mutate(codingRegion = ifelse(transcriptClass == "intergenic", F, codingRegion)) %>% 
+  dplyr::select(-transcriptClass) %>% 
+  arrange(novelORF_ID)
+write_tsv(annotationMasterFiltered, "nORFclassification.tsv")
