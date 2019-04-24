@@ -289,4 +289,3 @@ generateInFrameIDs <- function(gffFile, bed6File, txdb) {
   
   return(inFrameNorf_IDs)
 }
-
