@@ -83,6 +83,8 @@ OpenProt also generates novel ORFs with refseq annotations (sorfs.org does not).
 ./refseqOpenProtDownload.sh
 #Process data
 Rscript processDatasets.R openprotRefseq
+#Create bed6 file
+bedtools bed12tobed6 -i openprotRefseq_38.bed > openprotRefseq_38.6.bed
 #Classify entries
 Rscript classifyRefSeq.R
 ```
