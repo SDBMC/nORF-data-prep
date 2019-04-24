@@ -1,6 +1,4 @@
 #!/usr/bin/env Rscript
-setwd("~/Documents/MATT/Cambridge/PrabLab/nORF-Preparation")
-
 library(tidyverse)
 library(GenomicRanges)
 library(rtracklayer)
