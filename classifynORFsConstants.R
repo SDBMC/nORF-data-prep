@@ -289,3 +289,14 @@ generateInFrameIDs <- function(gffFile, bed6File, txdb) {
   
   return(inFrameNorf_IDs)
 }
+
+#Annotate as coding region nORF if it matches selected transcript types OR overlaps with CDS
+generateCodingRegionIDs <- function(annotationTable, proteinCodingExons) {
+  overlap <- findOverlaps(novelORFs, proteinCodingExons, type = "any")
+  overlapNovelORFs <- novelORFs@elementMetadata@listData$V4[unique(overlap@from)]
+  annotationTable2 <- annotationTable %>% 
+    filter(transcriptClass == "protein_coding" | transcriptClass == "intronic_codingTranscript" | 
+             transcriptBiotype == "nonsense_mediated_decay" | transcriptBiotype == "retained_intron" |
+             transcriptBiotype == "antisense" | novelORF_ID %in% overlapNovelORFs)
+  return(annotationTable2)
+}
