@@ -25,13 +25,17 @@ processDataset <- function(dataset) {
   } else if (dataset == "sorfs") {
     sorfs <- processSorfs()
     return(sorfs)
+  } else if (dataset == "pseudogenes") {
+    pseudogenes <- processPseudogenes()
+    return(pseudogenes)
   } else if (dataset == "sorfsMS") {
     sorfsMS <- processSorfs(dataset = "sorfsMS")
     return(sorfsMS)
   } else if (dataset == "all") {
     openprot <- processOpenProt(annotation = "ensembl")
     sorfs <- processSorfs()
-    combined <- combineNovelORFs(sorfs,openprot)
+    pseudogenes <- processPseudogenes()
+    combined <- combineNovelORFs(sorfs,openprot,pseudogenes)
     return(combined)
   }}
 
@@ -46,5 +50,3 @@ write_tsv(novelORFbed, path = paste0(args[1],"_38.bed"), col_names = F)
 #Convert to gtf and write out
 novelORFgtf <- createGTF(novelORFtableNamed)
 write.table(novelORFgtf, paste0(args[1],"_38.gtf"), col.names = F, row.names = F, sep = "\t", quote = F)
-
-
