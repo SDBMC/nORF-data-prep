@@ -61,26 +61,27 @@ nonCodingTranscriptIDs <- transcriptTypes %>%
 nonCodingExons <- exonsByTranscript[exonsByTranscript@partitioning@NAMES %in% nonCodingTranscriptIDs$transcript_ID]
 nonCodingIntrons <- intronsByTranscript[intronsByTranscript@partitioning@NAMES %in% nonCodingTranscriptIDs$transcript_ID]
 
-#Separate nORFs into seven major classes and create tibble for annotating each novel ORF
+#Separate nORFs into five major classes and create tibble for annotating each novel ORF
 #1. Within a protein coding exon
 #2. Within a non coding exon
-#3. Partial overlap of protein coding exon
-#4. Partial overlap of non coding exon
-#5. Within an intron of protein coding transcript
-#6. Within an intron of non-coding transcript
-#7. None of 1-3 (intergenic)
+#3. Within an intron of protein coding transcript
+#4. Within an intron of non-coding transcript
+#5. None of 1-3 (intergenic)
 annotationClasses <- groupClasses()
 
 #Classify in full detail
 annotationMaster <- classify_nORFs(annotationTibble = annotationClasses, txdbInput = human)
 
-#Label as protein coding T/F and in-frame with protein coding T/F
+#Label as protein region coding T/F and in-frame with protein coding T/F
 inFrameIDs <- generateInFrameIDs(gffFile = "Homo_sapiens.GRCh38.96.gff3", bed6File = "all_38.6.bed", txdb = human)
+
+codingRegionIDs <- generateCodingRegionIDs(annotationMaster, proteinCodingExons)
 annotationMasterFiltered <- annotationMaster %>% 
   mutate(inFrame = ifelse(novelORF_ID %in% inFrameIDs$norf_ID, T, F)) %>% 
-  mutate(codingRegion = ifelse(transcriptClass == "protein_coding" | transcriptClass == "intronic_codingTranscript" |
-                                        transcriptBiotype == "nonsense_mediated_decay" | transcriptBiotype == "retained_intron", T, F)) %>% 
-  mutate(codingRegion = ifelse(transcriptClass == "intergenic", F, codingRegion)) %>% 
+  mutate(codingRegion = ifelse(novelORF_ID %in% codingRegionIDs$novelORF_ID, T, F)) %>% 
   dplyr::select(-transcriptClass) %>% 
   arrange(novelORF_ID)
 write_tsv(annotationMasterFiltered, "nORFclassification.tsv")
+
+
+
