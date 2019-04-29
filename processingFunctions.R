@@ -143,9 +143,23 @@ processSorfs <- function(dataset = "sorfs") {
   return(sorfsTable)
 }
 
-combineNovelORFs <- function(sorfs,openprot) {
+processPseudogenes <- function() {
+  bedFile <- read_tsv("pseudogenes.bed", col_names = c("chrom", "chromStart", "chromStop", "name", "score", "strand", 
+                                                       "thickStart", "thickEnd", "itemRgb", "blockCount","blockSizes", 
+                                                       "blockStarts"), 
+                      col_types = "ciiciciicicc")
+  pseudogeneTable <- bedFile %>% 
+    mutate(source = "pseudogenes_Xu2016") %>% 
+    mutate(aaSeq = NA) %>% 
+    mutate(startCodon = 'ATG') %>% 
+    mutate(length = NA)
+  return(pseudogeneTable)
+}
+
+
+combineNovelORFs <- function(sorfs,openprot,pseudogenes) {
   #Bind and remove duplcates between datasets
-  merged <- bind_rows(sorfs,openprot) %>% 
+  merged <- bind_rows(sorfs,openprot,pseudogenes) %>% 
     arrange(chrom, chromStart, chromStop, source) %>% 
     distinct(chrom, chromStart, chromStop, aaSeq, .keep_all = T)
   
@@ -172,7 +186,7 @@ addIDs <- function(novelORFtable) {
   novelORFtableMerge <- novelORFtable %>% 
     mutate(mergeKey = str_c((chromStart +1),chromStop, name)) %>% 
     left_join(idKey, by = "mergeKey") %>% 
-    mutate(name = id) %>% 
+    mutate(name = ifelse(str_detect(name, "psH"), name, id)) %>% 
     dplyr::select(-id, mergeKey) %>% 
     filter(!(is.na(name)))
   return(novelORFtableMerge)
@@ -196,3 +210,10 @@ createGTF <- function(novelORFtable) {
                         '"; start_codon "', novelORFtable$startCodon, '"; sorf_length "', novelORFtable$length,'";' ))
   return(gtfFile)
 }
+
+
+
+
+
+
+
