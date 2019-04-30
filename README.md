@@ -28,6 +28,7 @@ The code below downloads and names `.tsv`, `.bed`, and `.fasta` files with the f
 * Supporting Evidence: All predicted
 
 ```
+chmod +x ensemblOpenProtDownload.sh
 ./ensemblOpenProtDownload.sh
 ```
 
@@ -81,6 +82,7 @@ OpenProt also generates novel ORFs with refseq annotations (sorfs.org does not).
 
 ```
 #Download files
+chmod +x refseqOpenProtDownload.sh
 ./refseqOpenProtDownload.sh
 #Process data
 Rscript processDatasets.R openprotRefseq
