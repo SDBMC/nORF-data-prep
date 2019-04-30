@@ -71,7 +71,7 @@ Rscript processDatasets.R all
 This script classifies the combined OpenProt and sorfs.org entries by their transcript type/relation to enannotated protein coding regions.
 ```
 #Create bed6 file
-bedtools bed12tobed6 -i all_38.bed > all_38.6.bed
+bedtools bed12tobed6 -i all_38.bed > dataFiles/all_38.6.bed
 #Combined sorfs + openprot
 Rscript classifynORFsCode.R
 ```
@@ -86,8 +86,6 @@ chmod +x refseqOpenProtDownload.sh
 ./refseqOpenProtDownload.sh
 #Process data
 Rscript processDatasets.R openprotRefseq
-#Create bed6 file
-bedtools bed12tobed6 -i openprotRefseq_38.bed > openprotRefseq_38.6.bed
 #Classify entries
 Rscript classifyRefSeq.R
 ```
