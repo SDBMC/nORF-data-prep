@@ -243,7 +243,7 @@ generateInFrameIDs <- function(gffFile, bed6File, txdb) {
   
   exonsAll <- exons(txdb, use.names=T)
   
-  novelORFsExons <- import.bed("all_38_firstExon.6.bed")
+  novelORFsExons <- import.bed("dataFiles/all_38_firstExon.6.bed")
   novelORFsExons <- renameSeqlevels(novelORFsExons, gsub("chr","", seqlevels(novelORFsExons)))
   
   inFrame <- findOverlaps(novelORFsExons, exonsAll, type = "any")

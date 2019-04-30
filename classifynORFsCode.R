@@ -29,7 +29,7 @@ novelORFs <- renameSeqlevels(novelORFs, gsub("chr","", seqlevels(novelORFs)))
   #Ensembl Genes 96, Dataset: Human genes(GRCh38.p12), Attributes: Transcript stable ID + Transcript type, Unique results only
 proteinCodingBiotypes <- c("protein_coding","IG_C_gene", "IG_D_gene", "IG_J_gene", "IG_V_gene",
                            "TR_C_gene", "TR_D_gene", "TR_J_gene", "TR_V_gene")
-transcriptTypes <- read_tsv("transcriptTypes.txt", col_names = c("transcript_ID", "transcriptBiotype"), skip = 1, col_types = "cc") %>% 
+transcriptTypes <- read_tsv("dataFiles/transcriptTypes.txt", col_names = c("transcript_ID", "transcriptBiotype"), skip = 1, col_types = "cc") %>% 
   mutate(transcriptBiotype = ifelse(transcriptBiotype %in% proteinCodingBiotypes, 'protein_coding', transcriptBiotype)) 
 
 
@@ -73,7 +73,7 @@ annotationClasses <- groupClasses()
 annotationMaster <- classify_nORFs(annotationTibble = annotationClasses, txdbInput = human)
 
 #Label as protein region coding T/F and in-frame with protein coding T/F
-inFrameIDs <- generateInFrameIDs(gffFile = "Homo_sapiens.GRCh38.96.gff3", bed6File = "all_38.6.bed", txdb = human)
+inFrameIDs <- generateInFrameIDs(gffFile = "dataFiles/Homo_sapiens.GRCh38.96.gff3", bed6File = "all_38.6.bed", txdb = human)
 
 codingRegionIDs <- generateCodingRegionIDs(annotationMaster, proteinCodingExons)
 annotationMasterFiltered <- annotationMaster %>% 
