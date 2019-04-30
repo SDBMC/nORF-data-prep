@@ -73,7 +73,7 @@ annotationClasses <- groupClasses()
 annotationMaster <- classify_nORFs(annotationTibble = annotationClasses, txdbInput = human)
 
 #Label as protein region coding T/F and in-frame with protein coding T/F
-inFrameIDs <- generateInFrameIDs(gffFile = "dataFiles/Homo_sapiens.GRCh38.96.gff3", bed6File = "all_38.6.bed", txdb = human)
+inFrameIDs <- generateInFrameIDs(gffFile = "dataFiles/Homo_sapiens.GRCh38.96.gff3", bed6File = "dataFiles/all_38.6.bed", txdb = human)
 
 codingRegionIDs <- generateCodingRegionIDs(annotationMaster, proteinCodingExons)
 annotationMasterFiltered <- annotationMaster %>% 

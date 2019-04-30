@@ -239,7 +239,7 @@ generateInFrameIDs <- function(gffFile, bed6File, txdb) {
   bedFirstExon <- bedFirstExonPlus %>% 
     bind_rows(bedFirstExonMinus) %>% 
     arrange(X1, X2)
-  write_tsv(bedFirstExon, "all_38_firstExon.6.bed", col_names = F)
+  write_tsv(bedFirstExon, "dataFiles/all_38_firstExon.6.bed", col_names = F)
   
   exonsAll <- exons(txdb, use.names=T)
   
