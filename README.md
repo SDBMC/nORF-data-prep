@@ -39,7 +39,7 @@ The code below downloads files with the following parameters from sorfs.org (htt
 * Main Attributes: Sorf ID, Chromosome, Sorf Start, Sorf End, Strand, Spliced Start Parts, Spliced Stop Parts, Start Codon, Sorf Length, AA sequence, Transcript sequence, Biotype, Annotation, Ensembl Transcript ID
 
 ```
-wget -O sorfsDownload.txt 'http://biomart.biobix.be/martservice/results?query=<!DOCTYPE Query><Query client="true" processor="TSV" limit="-1" header="1"><Dataset name="BioMart" config="Human"><Filter name="human__classification_104" value="Extreme,Good" filter_list=""/><Attribute name="human__sorf_id_104"/><Attribute name="human__chr_104"/><Attribute name="human__sorf_begin_104"/><Attribute name="human__sorf_end_104"/><Attribute name="human__strand_104"/><Attribute name="human__start_parts_104"/><Attribute name="human__stop_parts_104"/><Attribute name="human__sorf_length_104"/><Attribute name="human__start_codon_104"/><Attribute name="human__aa_seq_104"/><Attribute name="human__biotype_104"/><Attribute name="human__annotation_104"/><Attribute name="human__id_104"/><Attribute name="human__tr_seq_104"/></Dataset></Query>'
+wget -O dataFiles/sorfsDownload.txt 'http://biomart.biobix.be/martservice/results?query=<!DOCTYPE Query><Query client="true" processor="TSV" limit="-1" header="1"><Dataset name="BioMart" config="Human"><Filter name="human__classification_104" value="Extreme,Good" filter_list=""/><Attribute name="human__sorf_id_104"/><Attribute name="human__chr_104"/><Attribute name="human__sorf_begin_104"/><Attribute name="human__sorf_end_104"/><Attribute name="human__strand_104"/><Attribute name="human__start_parts_104"/><Attribute name="human__stop_parts_104"/><Attribute name="human__sorf_length_104"/><Attribute name="human__start_codon_104"/><Attribute name="human__aa_seq_104"/><Attribute name="human__biotype_104"/><Attribute name="human__annotation_104"/><Attribute name="human__id_104"/><Attribute name="human__tr_seq_104"/></Dataset></Query>'
 ```
 #### Step 3: Download ensembl GFF file for annotation
 
@@ -48,6 +48,7 @@ This code downloads the ensembl `.gff` file for classifying the novel ORFs:
 #Download and unzip GFF3 file
 wget ftp://ftp.ensembl.org/pub/release-96/gff3/homo_sapiens/Homo_sapiens.GRCh38.96.gff3.gz
 gunzip Homo_sapiens.GRCh38.96.gff3.gz
+mv Homo_sapiens.GRCh38.96.gff3 dataFiles/Homo_sapiens.GRCh38.96.gff3
 ```
 
 
@@ -91,7 +92,7 @@ Rscript classifyRefSeq.R
 #### Sorfs.org with mass spec evidence
 Optionally, the code below downloads and processes a similar file for sorfs.org entries that also have mass spec evidence from their PRIDE ReSpin pipeline.
 ```
-wget -O sorfsDownload_MS.txt 'http://biomart.biobix.be/martservice/results?query=<!DOCTYPE Query><Query client="true" processor="TSV" limit="-1" header="1"><Dataset name="BioMart" config="Human"><Filter name="human__classification_104" value="Extreme,Good" filter_list=""/><Attribute name="human__sorf_id_104"/><Attribute name="human__chr_104"/><Attribute name="human__sorf_begin_104"/><Attribute name="human__sorf_end_104"/><Attribute name="human__strand_104"/><Attribute name="human__start_parts_104"/><Attribute name="human__stop_parts_104"/><Attribute name="human__sorf_length_104"/><Attribute name="human__start_codon_104"/><Attribute name="human__aa_seq_104"/><Attribute name="human__tr_seq_104"/><Attribute name="human__biotype_104"/><Attribute name="human__annotation_104"/><Attribute name="human__id_104"/><Attribute name="ReSpin__file_106"/></Dataset></Query>'
+wget -O dataFiles/sorfsDownload_MS.txt 'http://biomart.biobix.be/martservice/results?query=<!DOCTYPE Query><Query client="true" processor="TSV" limit="-1" header="1"><Dataset name="BioMart" config="Human"><Filter name="human__classification_104" value="Extreme,Good" filter_list=""/><Attribute name="human__sorf_id_104"/><Attribute name="human__chr_104"/><Attribute name="human__sorf_begin_104"/><Attribute name="human__sorf_end_104"/><Attribute name="human__strand_104"/><Attribute name="human__start_parts_104"/><Attribute name="human__stop_parts_104"/><Attribute name="human__sorf_length_104"/><Attribute name="human__start_codon_104"/><Attribute name="human__aa_seq_104"/><Attribute name="human__tr_seq_104"/><Attribute name="human__biotype_104"/><Attribute name="human__annotation_104"/><Attribute name="human__id_104"/><Attribute name="ReSpin__file_106"/></Dataset></Query>'
 Rscript processDatasets.R sorfsMS
 ```
 
