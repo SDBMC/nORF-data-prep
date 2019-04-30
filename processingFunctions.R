@@ -6,29 +6,29 @@ processOpenProt <- function(annotation) {
   #Read in BED, FASTA, and TSV files based on ensembl or refseq
   
   if (annotation == "ensembl") {
-    bedFile <- read_tsv("ensemblOpenProtAllPredicted_38.bed", 
+    bedFile <- read_tsv("dataFiles/ensemblOpenProtAllPredicted_38.bed", 
                         col_names = c("chrom", "chromStart", "chromStop", "name", "score", 
-                        "strand", "thickStart", "thickEnd", "itemRgb", "blockCount","blockSizes", "blockStarts"), 
+                                      "strand", "thickStart", "thickEnd", "itemRgb", "blockCount","blockSizes", "blockStarts"), 
                         col_types = "ciiciciicicc") %>% 
       #Remove a bugged entry
       filter(name != "IP_296985" | chrom != "chrY")
     
-    tsvFile <- read_tsv("ensemblOpenProtAllPredicted.tsv", skip = 1, col_types = "ccciddicciicccciiddcccd")
-    proteinFasta <- readAAStringSet("ensemblOpenProtAllPredicted_38.fasta") 
+    tsvFile <- read_tsv("dataFiles/ensemblOpenProtAllPredicted.tsv", skip = 1, col_types = "ccciddicciicccciiddcccd")
+    proteinFasta <- readAAStringSet("dataFiles/ensemblOpenProtAllPredicted_38.fasta") 
   } else if (annotation == "refseq") {
     
-    bedFile <- read_tsv("refseqOpenProtAllPredicted_38.bed", 
+    bedFile <- read_tsv("dataFiles/refseqOpenProtAllPredicted_38.bed", 
                         col_names = c("chrom", "chromStart", "chromStop", "name", "score", 
-                        "strand", "thickStart", "thickEnd", "itemRgb", "blockCount","blockSizes", "blockStarts"), 
+                                      "strand", "thickStart", "thickEnd", "itemRgb", "blockCount","blockSizes", "blockStarts"), 
                         col_types = "ciiciciicicc") 
     
-    tsvFile <- read_tsv("refseqOpenProtAllPredicted.tsv", skip = 1, col_types = "ccciddicciicccciiddcccd")
-    proteinFasta <- readAAStringSet("refseqOpenProtAllPredicted_38.fasta")     
-      
+    tsvFile <- read_tsv("dataFiles/refseqOpenProtAllPredicted.tsv", skip = 1, col_types = "ccciddicciicccciiddcccd")
+    proteinFasta <- readAAStringSet("dataFiles/refseqOpenProtAllPredicted_38.fasta")     
+    
     
   }
   
-
+  
   
   #Get IDs for subsets of interest
   #Also filters out some altProts that are isoforms on other transcripts and therefore unlikely to be true nORFs
@@ -42,7 +42,7 @@ processOpenProt <- function(annotation) {
   #Dataframe with AA seq
   dfp <- data.frame(str_split(names(proteinFasta), "\\|", simplify = T)[,1], paste(proteinFasta))
   colnames(dfp) <- c("name", "aaSeq")
-
+  
   #Create table formatted consistently with sorfs (effectively bed12 format + extra info)
   openProtTable <- bedFile %>% 
     filter(name %in% IDaltEvidence$`protein accession numbers`) %>% 
@@ -60,9 +60,9 @@ processOpenProt <- function(annotation) {
 processSorfs <- function(dataset = "sorfs") {
   #Read in TXT file
   if (dataset == "sorfsMS") {
-    rawFile <- read_tsv("sorfsDownload_MS.txt", col_types = 'cciiccciccccccc')
+    rawFile <- read_tsv("dataFiles/sorfsDownload_MS.txt", col_types = 'cciiccciccccccc')
   } else {
-    rawFile <- read_tsv("sorfsDownload.txt", col_types = 'cciicccicccccc')
+    rawFile <- read_tsv("dataFiles/sorfsDownload.txt", col_types = 'cciicccicccccc')
   }
   #Remove duplicates based on identical Chr, start, stop, strand, AND AAseq
   rawFile <- rawFile %>%
@@ -144,9 +144,9 @@ processSorfs <- function(dataset = "sorfs") {
 }
 
 processPseudogenes <- function() {
-  bedFile <- read_tsv("pseudogenes.bed", col_names = c("chrom", "chromStart", "chromStop", "name", "score", "strand", 
-                                                       "thickStart", "thickEnd", "itemRgb", "blockCount","blockSizes", 
-                                                       "blockStarts"), 
+  bedFile <- read_tsv("dataFiles/pseudogenes.bed", col_names = c("chrom", "chromStart", "chromStop", "name", "score", "strand", 
+                                                                 "thickStart", "thickEnd", "itemRgb", "blockCount","blockSizes", 
+                                                                 "blockStarts"), 
                       col_types = "ciiciciicicc")
   pseudogeneTable <- bedFile %>% 
     mutate(source = "pseudogenes_Xu2016") %>% 
@@ -180,7 +180,7 @@ combineNovelORFs <- function(sorfs,openprot,pseudogenes) {
 }
 
 addIDs <- function(novelORFtable) {
-  idKey <- readRDS("nORFsDB1.1.rds") %>% 
+  idKey <- readRDS("dataFiles/nORFsDB1.1.rds") %>% 
     mutate(mergeKey = str_c(start, end, name)) %>% 
     dplyr::select(mergeKey, id)
   novelORFtableMerge <- novelORFtable %>% 
@@ -210,10 +210,3 @@ createGTF <- function(novelORFtable) {
                         '"; start_codon "', novelORFtable$startCodon, '"; sorf_length "', novelORFtable$length,'";' ))
   return(gtfFile)
 }
-
-
-
-
-
-
-
