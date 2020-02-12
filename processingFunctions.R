@@ -180,7 +180,7 @@ combineNovelORFs <- function(sorfs,openprot,pseudogenes) {
 }
 
 addIDs <- function(novelORFtable) {
-  idKey <- readRDS("dataFiles/nORFsDB1.2.rds") %>% 
+  idKey <- readRDS("dataFiles/nORFsDB1.3.rds") %>% 
     mutate(mergeKey = str_c(start, end, name)) %>% 
     dplyr::select(mergeKey, id)
   novelORFtableMerge <- novelORFtable %>% 
