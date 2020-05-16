@@ -1,0 +1,916 @@
+---
+title: "nORF_Analysis"
+author: "Matt Neville"
+date: "14/05/2020"
+output: html_document
+---
+
+The following is a document reproducing analyses performed in the manuscript "A platform for curated products from novel Open Reading Frames (nORFs) prompts reinterpretation of disease variants." It uses the nORF files generated in the nORF_Data_Prep.Rmd document.
+
+Command line steps are given in bash blocks with eval = F so will not run by default. These are provided for replication purposes, exact commands needed may differ by machine.
+
+# 1. Setup and Downloads
+
+## 1a. Load required libraries
+```{r Libraries, include=FALSE}
+library(scales)
+library(circlize)
+library(ggpubr)
+library(ggrepel)
+library(rmeta)
+library(ggalluvial)
+library(magrittr)
+library(tidyverse)
+```
+
+## 1b. Prepare input/output files
+```{bash, eval = F}
+unzip dataFiles/gencode.v30.annotation.CDS.bed.zip
+unzip dataFiles/LDSCresults.zip
+unzip dataFiles/MAPSresults.zip
+
+mkdir plots
+```
+
+# 2. Data overview figures
+
+## Figure 3 b+c
+```{r Figure3}
+nORF_annotation <- read_tsv("nORFclassification.tsv", col_types = 'ccccll')
+
+figure3b <- function() {
+  dataTable <- as.data.frame(table(nORF_annotation$ORFannotation)) 
+  dataTable$Freq[3] <- dataTable$Freq[3] + dataTable$Freq[6]
+  
+  #annotationTable$Category <- c("Transcribed", "Canonical CDS", "3'UTR", "5'UTR", "all", "all_CDS", "all_NoCDS", "noInFrame", "noInFrame_CDS", "noInFrame_NoCDS")
+  trans = function(x) pmin(x, breakpoint) + scaling_factor * pmax(x - breakpoint, 0)
+  scaling_factor = 0.2
+  breakpoint = 3.5e4
+  yticks = c(0, 5e3, 1e4, 1.5e4, 2e4, 2.5e4, 3e4, 5e4, 7.5e4, 1e5)
+  ylabels = c(0, 5e3, 1e4, 1.5e4, 2e4, 2.5e4, 3e4, 9e4, 9.5e4, 1e5)
+  
+  break_end = 1.05
+  
+  annotationTable <- dataTable[c(16,17,19, 3,5 ,13, 8,7, 1,9,10,11,12),]
+  annotationTable <- annotationTable %>%
+    mutate(Freq_t = trans(Freq)) %>% 
+    mutate(Var1 = c("5'UTR", "5'UTR-altCDS", "5'UTR-intronic", "altCDS", "altCDS-intronic", "3'UTR", "intronic", "intergenic", "antisense", "ncRNA", "nmd", "pseudogene", "retained_intron")) %>% 
+    mutate(colorCode = c("o","o","o","b","b","o","g","g","r","r","r","r","r"))
+  annotationTable$label <- factor(annotationTable$Var1, levels = annotationTable$Var1)
+  
+  annotationPlot <- ggplot(annotationTable, aes(x = label, y = Freq_t, fill = colorCode)) + 
+    geom_bar(colour="black", stat="identity") +
+    theme_minimal() +
+    scale_fill_manual(values= c("#56B4E9", "#009E73", "#E69F00", "#CC6666"), guide = 'none') +
+    labs(x = NULL, y = "Count") +
+    theme(axis.text.y = element_text(size=18), axis.text.x = element_text(angle = 40, hjust = 1, size = 18), axis.title = element_text(size = 20)) +
+    theme(plot.margin = unit(c(0.5,3,0,2),"cm")) +
+    geom_rect(aes(xmin=0.4, xmax=Inf, ymin=3.3e4, ymax=breakpoint * break_end), fill='white') +
+    geom_hline(yintercept = 3.3e4, color='gray', linetype='dashed') +
+    geom_hline(yintercept = breakpoint * break_end, color='gray', linetype='dashed') +
+    theme(axis.line.y = element_blank()) +
+    scale_y_continuous(limits=c(0, NA), breaks=trans(yticks), labels=comma(ylabels),
+                       expand = c(0, 0), position="left") 
+  return(annotationPlot)
+}
+figure3b()
+
+figure3c <- function() {
+  swissprotLengths <- read_tsv("dataFiles/uniprot_swissprot_lengths_June19.tsv", col_types = "ci") %>% 
+    mutate(type = "canonical")
+  colnames(swissprotLengths) <- c("name", "length", "type")
+  norfsAnnot <- nORF_annotation %>% 
+    dplyr::select(novelORF_ID, ORFannotation)
+  norfLengths0 <- read_tsv("noInFrame_38.gtf", col_names = F, col_types = 'ccciicccc') %>%
+    separate(X9, into = c("novelORF_ID", NA, NA, "length"), sep = "; ") %>% 
+    mutate(novelORF_ID = str_remove(str_remove(novelORF_ID, "gene_id \""), "\"")) %>% 
+    mutate(length = as.numeric(str_remove(str_remove(length, "sorf_length \""), "\";"))) %>% 
+    left_join(norfsAnnot, by="novelORF_ID")
+  norfLengths <- norfLengths0 %>% 
+    mutate(type = "other") %>% 
+    mutate(type = ifelse(ORFannotation %in% c("ncRNA", "pseudogene", "nmd", "bidirectional_promoter_lncRNA", "retained_intron", "antisense"), "ncRNA", type)) %>% 
+    mutate(type = ifelse(ORFannotation %in% c("cds", "cds-intronic", "cds-utr3", "cds-intergenic"), "altCDS", type)) %>% 
+    mutate(type = ifelse(ORFannotation %in% c("utr5", "utr5-intronic", "utr5-cds","utr3", "utr3-intergenic", "utr5-intergenic", "utr3-intronic"), "UTR", type)) %>% 
+    mutate(type = ifelse(ORFannotation %in% c("intergenic"), "intergenic", type)) %>% 
+    filter(type != "other")
+
+  lengthTable <- bind_rows(swissprotLengths, norfLengths)
+  lengthTable$type <- factor(lengthTable$type,
+                             levels = c("UTR", "altCDS", "intergenic", "ncRNA" ,"canonical"),ordered = TRUE)
+  lengthPlot <- ggplot(lengthTable, aes(factor(type), length)) + 
+    theme_minimal() +
+    geom_violin(aes(fill = factor(type)), scale = "area") +
+    scale_y_continuous(trans ='log10') +
+    labs(x = NULL, y = "Length (AA)") +
+    theme(axis.text.y = element_text(size=18), axis.text.x = element_text(angle = 40, hjust = 1, size = 18), axis.title = element_text(size = 20)) +
+    scale_fill_manual(values= c("#E69F00", "#56B4E9", "#009E73", "#CC6666",  	"#D3D3D3"), guide = 'none') + 
+    geom_boxplot(width=0.1, outlier.shape = NA)
+  return(lengthPlot)
+}
+figure3c()
+
+
+```
+
+## Figure 3d: Circos Genomic density plot
+```{r circos}
+#194,407 nORFs genomic density against 754,731 known protein-coding region CDS
+#Figure 3d
+norf <- read.table("noInFrame_38.bed", stringsAsFactors = F)
+cds <- read.table("gencode.v30.annotation.CDS.bed", stringsAsFactors = F)
+
+circos.initializeWithIdeogram(species='hg38', chromosome.index = paste0("chr", c(1:22, "X", "Y")), plotType = c('labels')) 
+circos.genomicDensity(cds, col = "#D3D3D3")
+circos.genomicDensity(norf, col = "darkblue")
+legend(x = 1, y = 0.4, legend = c("canonical", "nORFs"), fill = c("#D3D3D3","darkblue" ), cex = 2, bty = "n")
+```
+
+## Full Figure 3
+```{r Fig3}
+p3b = figure3b() + theme(plot.margin = margin(5.5, 8.5, 5.5, 5.5))
+p3c = figure3c() #+ theme(plot.margin = margin(5.5, 8.5, 5.5, 5.5))
+png('plots/figure3.png', height=6, width=16, units = 'in', res=300)
+ggarrange(p3b,p3c, widths = c(2,1), labels = c('b', 'c'))
+dev.off()
+```
+
+# 3. LDSC
+
+## Random-effect meta-analysis across traits
+With Supplementary table 2
+```{r}
+#random-effect meta analysis across traits
+stringsAsFactors=FALSE
+resultFiles <- c("blood_EOSINOPHIL_COUNT","blood_PLATELET_COUNT","blood_RBC_DISTRIB_WIDTH","blood_RED_COUNT","blood_WHITE_COUNT","bmd_HEEL_TSCOREz","body_BALDING1","body_BMIz","body_HEIGHTz","body_WHRadjBMIz","bp_SYSTOLICadjMEDz","cov_EDU_COLLEGE","cov_SMOKING_STATUS","disease_AID_ALL","disease_ALLERGY_ECZEMA_DIAGNOSED","disease_ASTHMA_DIAGNOSED","disease_CARDIOVASCULAR","disease_T2D","lung_FEV1FVCzSMOKE","lung_FVCzSMOKE","mental_NEUROTICISM","other_MORNINGPERSON","pigment_SUNBURN","repro_AgeFirstBirth_Female","repro_MENARCHE_AGE","repro_MENOPAUSE_AGE","repro_NumberChildrenEverBorn_Pooled")
+
+metaAnalysisCommon <- function(resultFiles, folder) {
+  #CORRECT VERSION
+  M       = 5961159
+  enr        = NULL
+  enr_sd     = NULL
+  enrstat    = NULL
+  enrstat_sd = NULL
+  tau        = NULL
+  tau_sd     = NULL
+  
+  for (trait in resultFiles) {
+    data         = read_tsv(paste0(folder, trait,".customLF.enrichments"), col_names = T, col_types = 'cdddddddddddddddd')    #modify the .results path
+    log          = read.table(paste0(folder, trait,".customLF.log"),h=F,fill=T) #modify the .log path
+    h2g          = as.numeric(as.character(log[which(log$V4=="h2:"),5]))
+    enr          = cbind(enr   , data$CVE)
+    enr_sd       = cbind(enr_sd, data$CVE_se)
+    myenrstat    = (h2g/M)*((data$CVE)-(1-data$CVE*data$prop_common_snps)/(1-data$prop_common_snps))
+    myenrstat_z  = qnorm(data$CVE_p/2) #step2
+    myenrstat_sd = myenrstat/myenrstat_z #step3
+    enrstat      = cbind(enrstat   , myenrstat)
+    enrstat_sd   = cbind(enrstat_sd, myenrstat_sd)
+  } 
+  #meta analysis begins here
+  enr_meta = NULL
+  for (i in 1:nrow(enr)){
+    test1 = meta.summaries(enr[i,],enr_sd[i,],method="random")
+    if (data$prop_common_snps[i]==1) {
+      enr_meta = rbind(enr_meta,c(test1$summary,test1$se.summary,NA)) # case of the base annotation
+    } else {
+      test2 = meta.summaries(enrstat[i,],enrstat_sd[i,],method="random")
+      enr_meta = rbind(enr_meta,c(test1$summary,test1$se.summary,2*pnorm(-abs(test2$summary/test2$se.summary))))
+    }
+  }
+  
+  out = data.frame(as.character(data$annotation), as.numeric(as.character(data$prop_common_snps)) ,as.numeric(as.character(enr_meta[,1])),
+                   as.numeric(as.character(enr_meta[,2])),as.numeric(as.character(enr_meta[,3])))
+  colnames(out) = c("Annotation", "Prop_common_snps","CVE","CVE_se","CVE_pval")
+  
+  return(out)
+}
+
+metaAnalysisLowfrq <- function(resultFiles, folder) {
+  #CORRECT VERSION
+  M       = 5961159
+  enr        = NULL
+  enr_sd     = NULL
+  enrstat    = NULL
+  enrstat_sd = NULL
+  tau        = NULL
+  tau_sd     = NULL
+  
+  for (trait in resultFiles) {
+    data         = read_tsv(paste0(folder, trait,".customLF.enrichments"), col_names = T, col_types = 'cdddddddddddddddd')    #modify the .results path
+    log          = read.table(paste0(folder, trait,".customLF.log"),h=F,fill=T) #modify the .log path
+    h2g          = as.numeric(as.character(log[which(log$V4=="h2:"),5]))
+    enr          = cbind(enr   , data$LFVE)
+    enr_sd       = cbind(enr_sd, data$LFVE_se)
+    myenrstat    = 3*((data$LFVE)-(1-data$LFVE*data$prop_lowfrq_snps)/(1-data$prop_lowfrq_snps))
+    myenrstat_z  = qnorm(data$LFVE_p/2) #step2
+    myenrstat_sd = myenrstat/myenrstat_z #step3
+    enrstat      = cbind(enrstat   , myenrstat)
+    enrstat_sd   = cbind(enrstat_sd, myenrstat_sd)
+  } #close for loop
+  #meta analysis begins here
+  enr_meta = NULL
+  for (i in 1:nrow(enr)){
+    test1 = meta.summaries(enr[i,],enr_sd[i,],method="random")
+    if (data$prop_common_snps[i]==1) {
+      enr_meta = rbind(enr_meta,c(test1$summary,test1$se.summary,NA)) # case of the base annotation
+    } else {
+      test2 = meta.summaries(enrstat[i,],enrstat_sd[i,],method="random")
+      enr_meta = rbind(enr_meta,c(test1$summary,test1$se.summary,2*pnorm(-abs(test2$summary/test2$se.summary))))
+    }
+  }
+  
+  out = data.frame(as.character(data$annotation), as.numeric(as.character(data$prop_lowfrq_snps)) ,as.numeric(as.character(enr_meta[,1])),
+              as.numeric(as.character(enr_meta[,2])),as.numeric(as.character(enr_meta[,3])))
+  
+  colnames(out) = c("Annotation", "Prop_lowfrq_snps","LFVE","LFVE_se","LFVE_pval")
+  
+  return(out)
+}
+
+common <- metaAnalysisCommon(resultFiles, folder = "dataFiles/LDSCresults/")
+lowfrq <- metaAnalysisLowfrq(resultFiles, folder = "dataFiles/LDSCresults/")
+
+fullMeta <- common %>% 
+  left_join(lowfrq, by = "Annotation") %>% 
+  mutate('LFVE/CVE' = LFVE/CVE)
+
+#Supplementary table 2
+write_tsv(fullMeta, "plots/supTable2.txt")
+```
+
+## Figure 4
+```{r LDSC_Figure}
+
+#COMMON
+figure4a <- function(fullMeta) {
+  altTable <- fullMeta[c(68,69,71,70,72,74,73),]
+  altTable$Annotation <- c("Transcribed", "Canonical CDS", "5'UTR", "3'UTR", "nORFs", "nORFs_altCDS", "nORFs_noCDS")
+  altTable$commonlabel <- paste(altTable$Annotation," (",round(altTable$Prop_common_snps*100, digits = 2),"%)",sep='')
+  altTable$commonlabel <- factor(altTable$commonlabel, levels = altTable$commonlabel)
+  altTable$colorCode <- c("Canonical","Canonical","Canonical","Canonical","nORFs","nORFs","nORFs")
+  altPlot = ggplot(altTable, aes(x = commonlabel, y = CVE, fill = colorCode)) + 
+    geom_bar(stat="identity", width = .6 ) +
+    theme_minimal() +
+    scale_fill_manual(values=c("#56B4E9","#999999"),name=NULL) +
+    labs(x = "Annotation (% of common variants)", y = "CVE") +
+    theme(axis.text.y = element_text(size=10), axis.text.x = element_text(angle = 40, hjust = 1, size = 10), axis.title = element_text(size = 14), axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0)), axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0))) +
+    theme(plot.margin = unit(c(0.5,0.5,1.5,1),"cm")) +
+    coord_cartesian(xlim = c(1, 7), clip = 'off') +
+    scale_y_continuous(breaks = c(0,2,4,6,8,10)) +
+    geom_errorbar(aes(ymin = CVE-CVE_se, ymax=CVE+CVE_se), width=.2, position=position_dodge(.9)) +
+    geom_hline(yintercept = 1, linetype = "dashed") +
+    annotate("text", x = 8.25, y = 1, label = "No enrichment", size = 3) 
+  altPlot
+}
+figure4a(fullMeta)
+
+#LOWFRQ
+figure4b <- function(fullMeta) {
+  altTableLF <- fullMeta[c(68,69,71,70,72,74,73),]
+  altTableLF$Annotation <- c("Transcribed", "Canonical CDS", "5'UTR", "3'UTR", "nORFs", "nORFs_altCDS", "nORFs_noCDS")
+  altTableLF$lowfrqlabel <- paste(altTableLF$Annotation," (",round(altTableLF$Prop_lowfrq_snps*100, digits = 2),"%)",sep='')
+  altTableLF$lowfrqlabel <- factor(altTableLF$lowfrqlabel, levels = altTableLF$lowfrqlabel)
+  altTableLF$colorCode <-  c("Canonical","Canonical","Canonical","Canonical","nORFs","nORFs","nORFs")
+  altPlotLF = ggplot(altTableLF, aes(x = lowfrqlabel, y = LFVE, fill = colorCode)) + 
+    geom_bar(stat="identity", width = .6 ) +
+    theme_minimal() +
+    scale_fill_manual(values=c("#56B4E9","#999999"), name=NULL) +
+    labs(x = "Annotation (% of low freq variants)", y = "LFVE") +
+    theme(axis.text.y = element_text(size=10), axis.text.x = element_text(angle = 40, hjust = 1, size = 10), axis.title = element_text(size = 14),
+          axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0)), axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0))) +
+    theme(plot.margin = unit(c(0,0.5,1.5,1),"cm")) +
+    coord_cartesian(xlim = c(1, 7), clip = 'off') +
+    geom_errorbar(aes(ymin = LFVE-LFVE_se, ymax=LFVE+LFVE_se), width=.2, position=position_dodge(.9)) +
+    geom_hline(yintercept = 1, linetype = "dashed") +
+    annotate("text", x = 8.25, y = 1, label = "No enrichment", size = 3) 
+  return(altPlotLF)
+}
+figure4b(fullMeta)
+
+figure4c <- function(fullMeta) {
+  ratioTable <- fullMeta[c(68,69,71,70,72,74,73),]
+  ratioTable$Annotation <- c("Transcribed", "Canonical CDS", "5'UTR", "3'UTR", "nORFs", "nORFs_altCDS", "nORFs_noCDS")
+  ratioTable$colorCode <- c("Canonical","Canonical", "Canonical", "Canonical", "nORFs", "nORFs", "nORFs")
+  ratioPlot <- ggplot(ratioTable, aes(x=CVE, y= LFVE, label = Annotation, color = colorCode, shape = colorCode)) +
+    geom_point(size = 3) +
+    theme_minimal() +
+    theme(axis.title = element_text(size = 14)) +
+    theme(axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0)), axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0))) +
+    geom_errorbar(aes(ymin = LFVE-LFVE_se, ymax=LFVE+LFVE_se)) +
+    geom_errorbarh(aes(xmin = CVE-CVE_se, xmax=CVE+CVE_se)) +
+    scale_color_manual(values=c("#56B4E9","#999999"), name=NULL) +
+    scale_shape_manual(values=c(16,17), name=NULL) +
+    scale_x_continuous(limits = c(0,NA), breaks = c(0,2,4,6,8,10)) +
+    #scale_y_continuous(limits = c(NA,15)) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", colour = "lightgrey") +
+    geom_abline(slope = 2, intercept = 0, linetype = "dashed", colour = "lightgrey") +
+    geom_abline(slope = 3, intercept = 0, linetype = "dashed", colour = "lightgrey") +
+    geom_abline(slope = 4, intercept = 0, linetype = "dashed", colour = "lightgrey") +
+    geom_abline(slope = 5, intercept = 0, linetype = "dashed", colour = "lightgrey") +
+    annotate("text", x = 11, y = 12, label = "x1", size = 3, colour = "darkgrey") +
+    annotate("text", x = 11, y = 23.2, label = "x2", size = 3, colour = "darkgrey") +
+    annotate("text", x = 11, y = 35, label = "x3", size = 3, colour = "darkgrey") +
+    annotate("text", x = 8.6, y = 36, label = "x4", size = 3, colour = "darkgrey") +
+    annotate("text", x = 6.7, y = 36, label = "x5", size = 3, colour = "darkgrey") +
+    geom_text_repel(colour = "black", point.padding = .5)
+  return(ratioPlot)
+}
+figure4c(fullMeta)
+
+
+figure4 = function() {
+  p4a = figure4a(fullMeta) 
+  p4b = figure4b(fullMeta)
+  p4c = figure4c(fullMeta)
+  png('plots/figure4.png', height=14, width=8, units = 'in', res=300)
+  ggarrange(p4a,p4b,p4c, nrow = 3, ncol = 1, labels = c('a', 'b', 'c'))
+  dev.off()
+}
+figure4()
+```
+
+# 4. MAPS
+
+```{r MAPS}
+
+###Code to create figures for gnomAD MAPS analysis
+
+color_syn = '#AAAAAA'
+color_mis = '#FF6103'
+color_lof = '#9D1309'
+
+plainMapsExomes <- read_tsv("dataFiles/MAPSresults/maps_plain_exomes.txt", col_names = T, col_types = 'cldddddd')
+syn_exomes_maps = plainMapsExomes %>% filter(protein_coding & worst_csq == 'synonymous_variant') %$% maps
+mis_exomes_maps = plainMapsExomes %>% filter(protein_coding & worst_csq == 'missense_variant') %$% maps
+nonsense_exomes_maps = plainMapsExomes %>% filter(protein_coding & worst_csq == 'stop_gained') %$% maps
+stoplost_exomes_maps = plainMapsExomes %>% filter(protein_coding & worst_csq == 'stop_lost') %$% maps
+
+plainMapsGenomes <- read_tsv("dataFiles/MAPSresults/maps_plain_genomes.txt", col_names = T, col_types = 'cldddddd')
+syn_genomes_maps = plainMapsGenomes %>% filter(protein_coding & worst_csq == 'synonymous_variant') %$% maps
+mis_genomes_maps = plainMapsGenomes %>% filter(protein_coding & worst_csq == 'missense_variant') %$% maps
+nonsense_genomes_maps = plainMapsGenomes %>% filter(protein_coding & worst_csq == 'stop_gained') %$% maps
+stoplost_genomes_maps = plainMapsGenomes %>% filter(protein_coding & worst_csq == 'stop_lost') %$% maps
+
+
+format_vep_category <- function(category_list) {
+  return(category_list %>%
+           gsub("_"," ", .) %>%
+           gsub(" variant", "", .) %>%
+           gsub("non coding transcript exon", "ncRNA", .) %>%
+           gsub(" prime ","'", .))
+}
+
+regroup_maps = function(data, maps_grouping) {
+  maps = data %>%
+    group_by_at(vars(maps_grouping)) %>% 
+    dplyr::summarize(singleton_count=sum(singleton_count),
+              expected_singletons=sum(expected_singletons),
+              variant_count=sum(variant_count),
+              ps=singleton_count / variant_count,
+              maps=(singleton_count - expected_singletons)/variant_count,
+              maps_sem=sqrt(ps * (1 - ps) / variant_count),
+              maps_upper=maps + 1.96 * maps_sem,
+              maps_lower=maps - 1.96 * maps_sem) %>% ungroup
+  return(maps)
+}
+
+canonicalChosenCsq <- c('missense_variant', 'non_coding_transcript_exon_variant',
+                        'synonymous_variant', 'intron_variant',
+                        '5_prime_UTR_variant', '3_prime_UTR_variant', 'intergenic_variant')
+nORFsChosenCsq <- c('missense_variant', 'stop_gained', 'stop_lost', 'splice_acceptor_variant', 'splice_donor_variant',
+               'synonymous_variant', 'intron_variant', 'intergenic_variant', 'upstream_gene_variant', 'downstream_gene_variant')
+
+load_maps_data <- function(data_type = 'exomes', type = "segmented", group_splice = T, group_noncoding = T) {
+  if (type == "segmented") {
+    mapsData <- read_tsv(paste0('dataFiles/MAPSresults/maps_norfs_', data_type, '.txt'), col_types = 'ccididdd') %>%
+      filter(worst_csq %in% canonicalChosenCsq,
+             nORF_csq %in% nORFsChosenCsq) %>% 
+      mutate(worst_csq=format_vep_category(worst_csq),
+             nORF_csq=format_vep_category(nORF_csq),
+             maps_upper=maps + 1.96 * maps_sem,
+             maps_lower=maps - 1.96 * maps_sem)
+  }
+  else if (type == "nofilter") {
+    mapsData <- read_tsv(paste0('dataFiles/MAPSresults/noCanonicalFilter_', data_type, '.txt'), col_types = 'ccididdd') %>%
+      filter(worst_csq %in% canonicalChosenCsq,
+             nORF_csq %in% nORFsChosenCsq) %>% 
+      mutate(worst_csq=format_vep_category(worst_csq),
+             nORF_csq=format_vep_category(nORF_csq),
+             maps_upper=maps + 1.96 * maps_sem,
+             maps_lower=maps - 1.96 * maps_sem)
+  }
+  else if (type == "onlynorfs") {
+    mapsData <- read_tsv(paste0('dataFiles/MAPSresults/onlynorfs_', data_type, '.txt'), col_types = 'cididdd') %>%
+      filter(nORF_csq %in% nORFsChosenCsq) %>% 
+      mutate(nORF_csq=format_vep_category(nORF_csq),
+             maps_upper=maps + 1.96 * maps_sem,
+             maps_lower=maps - 1.96 * maps_sem)
+  }
+  if (group_splice & type %in% c("segmented", "nofilter")) {
+    mapsData = mapsData %>%
+      mutate(nORF_csq = fct_recode(nORF_csq, 'essential splice' = 'splice donor',
+                                   'essential splice' = 'splice acceptor')) %>%
+      regroup_maps(c('worst_csq','nORF_csq'))
+  }
+  if (group_splice & type == "onlynorfs") {
+    mapsData = mapsData %>%
+      mutate(nORF_csq = fct_recode(nORF_csq, 'essential splice' = 'splice donor',
+                                   'essential splice' = 'splice acceptor')) %>%
+      regroup_maps('nORF_csq')
+  }
+  if (group_noncoding & type %in% c("segmented", "nofilter")) {
+    mapsData = mapsData %>%
+      #mutate(worst_csq = fct_recode(worst_csq, 'non-coding' = "5'UTR",'non-coding' = 'intergenic', 'non-coding' = "3'UTR", 'non-coding' = 'non coding transcript','non-coding' = 'intron')) %>%
+      mutate(nORF_csq = fct_recode(nORF_csq, 'non-coding' = 'intron', 'non-coding' = 'intergenic', 'non-coding' = 'downstream gene','non-coding' = 'upstream gene')) %>% 
+      regroup_maps(c('worst_csq','nORF_csq'))    
+  }
+  if (group_noncoding & type == "onlynorfs") {
+    mapsData = mapsData %>%
+      mutate(nORF_csq = fct_recode(nORF_csq, 'non-coding' = 'intron',
+                                   'non-coding' = 'intergenic',
+                                   'non-coding' = 'downstream gene',
+                                   'non-coding' = 'upstream gene')) %>%
+      regroup_maps('nORF_csq')    
+  }
+  mapsData = mapsData %>% 
+    filter(variant_count > 100)
+  
+  return(mapsData)
+}
+
+
+#Both with canonical filter
+#mapsData = load_maps_data(data_type = 'exomes', type = "segmented")
+#mapsData = load_maps_data(data_type = 'genomes', type = "segmented")
+#Both no filter
+ordering_worst_csq = c('intergenic', 'intron', "5'UTR", "3'UTR", 'ncRNA',
+                       'synonymous', 'missense')
+ordering_nORF_csq = c('non-coding', 'synonymous', 'missense', 'stop lost', 'stop gained')
+
+
+exomesData = load_maps_data(data_type = 'exomes', type = "nofilter") %>%
+  mutate(worst_csq=fct_relevel(worst_csq, ordering_worst_csq )) %>% 
+  mutate(nORF_csq=fct_relevel(nORF_csq, ordering_nORF_csq))
+genomesData = load_maps_data(data_type = 'genomes', type = "nofilter") %>%
+  mutate(worst_csq=fct_relevel(worst_csq, ordering_worst_csq )) %>% 
+  mutate(nORF_csq=fct_relevel(nORF_csq, ordering_nORF_csq))
+
+
+exomesTileData <- load_maps_data(data_type = 'exomes', type = "nofilter") %>% 
+  dplyr::select(worst_csq, nORF_csq, variant_count) %>% 
+  bind_rows(tibble(worst_csq = "intergenic", 
+                   nORF_csq = c("missense", "stop lost", "stop gained", "synonymous"), 
+                   variant_count = 0)) %>%
+  mutate(worst_csq=fct_relevel(worst_csq, ordering_worst_csq )) %>% 
+  mutate(nORF_csq=fct_relevel(nORF_csq, ordering_nORF_csq))
+  
+exomesTiles <- ggplot(exomesTileData, aes(worst_csq, nORF_csq)) + 
+  theme_minimal() +
+  geom_tile(aes(fill=variant_count), colour = "black", ) +
+  scale_fill_gradient(low = "white", high = "#56B4E9", trans = pseudo_log_trans(sigma = 100), 
+                      breaks = c(1e+03, 1e+05, 1e+07),
+                      limits = c(NA, 1.1e+08),
+                      name = "Variant Count") +
+  geom_text(aes(label=comma(variant_count)), size = 3.5) +
+  theme(axis.text.x = element_text(angle = 40, hjust = 1), 
+        axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0)), 
+        axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0))) +
+  ggtitle("Exomes") +
+  theme(plot.title=element_text(size=15, vjust=1, hjust = 0.5)) +
+  xlab("Canonical Consequence") + ylab("nORF Consequence") 
+exomesTiles
+
+genomesTiles <- ggplot(genomesData, aes(worst_csq, nORF_csq)) + 
+  theme_minimal() +
+  geom_tile(aes(fill=variant_count), colour = "black", ) +
+  scale_fill_gradient(low = "white", high = "#56B4E9", trans = pseudo_log_trans(sigma = 100), 
+                      breaks = c(1e+03, 1e+05, 1e+07),
+                      limits = c(NA, 1.1e+08),
+                      name = "Variant Count") +
+  geom_text(aes(label=comma(variant_count)), size = 3) +
+  theme(axis.text.x = element_text(angle = 40, hjust = 1), 
+        axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0)), 
+        axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0))) +
+  ggtitle("Genomes") +
+  theme(plot.title=element_text(size=15, vjust=1, hjust = 0.5)) +
+  xlab("Canonical Consequence") + ylab("nORF Consequence") 
+genomesTiles
+
+figureTiles = function() {
+  pMa = exomesTiles + theme(plot.margin = unit(c(0.1,0,1.1,0.1), "cm")) #+ theme(legend.position = "none")
+  pMb = genomesTiles + theme(plot.margin = unit(c(0.1,0.1,0.1,0.1), "cm")) 
+  pdf('plots/figureTiles.pdf', height=12, width=8)
+  ggarrange(pMa,pMb, labels = c('a', 'b'), ncol = 1, nrow = 2)
+  #ggarrange(p2a, p2c, p2b, p2d, ncol = 2, nrow = 2, labels = c('a', 'c', 'b', 'd'))
+  dev.off()
+  png('plots/figureTiles.png', height=12, width=8, units = 'in', res=300)
+  ggarrange(pMa,pMb, labels = c('a', 'b'), ncol = 1, nrow = 2)
+  dev.off()
+}
+figureTiles()
+
+#Segmented plot
+exomesPlot <- ggplot(exomesData) + aes(x = worst_csq, y = maps, ymin = maps_lower, ymax = maps_upper, color = nORF_csq) + 
+  geom_pointrange(position = position_dodge(width = 0.5)) + 
+  geom_hline(yintercept = mis_exomes_maps, color = color_mis, linetype = 'dashed') + 
+  geom_hline(yintercept = syn_exomes_maps, color = color_syn, linetype = 'dashed') + 
+  geom_hline(yintercept = nonsense_exomes_maps, color = color_lof, linetype = 'dashed') + 
+  #geom_hline(yintercept = stoplost_exomes_maps, color = color_lof, linetype = 'dashed') + 
+  annotate('text', x = 0.9, y = mis_exomes_maps + 0.007, size = 3, hjust = 1, color = color_mis, label = 'missense') + 
+  annotate('text', x = 1.025, y = syn_exomes_maps + 0.007, size = 3, hjust = 1, color = color_syn, label = 'synonymous') + 
+  annotate('text', x = 1.00, y = nonsense_exomes_maps + 0.007, size = 3, hjust = 1, color = color_lof, label = 'stop gained') + 
+  #annotate('text', x = 0.9, y = stoplost_exomes_maps + 0.007, size = 3, hjust = 1, color = color_lof, label = 'stop lost') + 
+  theme_classic() +
+  ggtitle("Exomes") +
+  theme(plot.title=element_text(size=15, vjust=1, hjust = 0.5)) +
+  xlab("Canonical Consequence") + ylab("MAPS Score") + labs(color='nORF Consequence') +
+  scale_y_continuous(limits = c(-0.07, 0.16), breaks = c(-0.05, 0, 0.05, 0.1, 0.15)) +
+  theme(plot.margin = margin(0, 5.5, 0, 5.5)) + 
+  guides(color = guide_legend(reverse = TRUE))
+exomesPlot
+
+
+
+genomesPlot <- ggplot(genomesData) + aes(x = worst_csq, y = maps, ymin = maps_lower, ymax = maps_upper, color = nORF_csq) + 
+  geom_pointrange(position = position_dodge(width = 0.5)) + 
+  geom_hline(yintercept = mis_genomes_maps, color = color_mis, linetype = 'dashed') + 
+  geom_hline(yintercept = syn_genomes_maps, color = color_syn, linetype = 'dashed') + 
+  geom_hline(yintercept = nonsense_genomes_maps, color = color_lof, linetype = 'dashed') + 
+  #geom_hline(yintercept = stoplost_genomes_maps, color = color_lof, linetype = 'dashed') + 
+  annotate('text', x = 0.9, y = mis_genomes_maps + 0.007, size = 3, hjust = 1, color = color_mis, label = 'missense') + 
+  annotate('text', x = 1.025, y = syn_genomes_maps + 0.007, size = 3, hjust = 1, color = color_syn, label = 'synonymous') + 
+  annotate('text', x = 1.0, y = nonsense_genomes_maps + 0.007, size = 3, hjust = 1, color = color_lof, label = 'stop gained') + 
+  #annotate('text', x = 0.9, y = stoplost_genomes_maps - 0.007, size = 3, hjust = 1, color = color_lof, label = 'stop lost') + 
+  theme_classic() +
+  ggtitle("Genomes") +
+  theme(plot.title=element_text(size=15, vjust=1, hjust = 0.5)) +
+  xlab("Canonical Consequence") + ylab("MAPS Score") + labs(color='nORF Consequence') +
+  scale_y_continuous(limits = c(-0.07, 0.19), breaks = c(-0.05, 0, 0.05, 0.1, 0.15)) +
+  theme(plot.margin = unit(c(1,0,1,0), "cm")) + 
+  guides(color = guide_legend(reverse = TRUE))
+genomesPlot
+
+figureMAPS = function() {
+  pMa = exomesPlot + theme(plot.margin = unit(c(0.1,0.1,1,0.1), "cm")) 
+  pMb = genomesPlot + theme(plot.margin = unit(c(0.1,0.1,1,0.1), "cm")) 
+  pdf('plots/figureMAPS.pdf', height=10, width=11)
+  ggarrange(pMa,pMb, heights = c(1,1), labels = c('a', 'b'), ncol = 1, nrow = 2)
+  #ggarrange(p2a, p2c, p2b, p2d, ncol = 2, nrow = 2, labels = c('a', 'c', 'b', 'd'))
+  dev.off()
+  png('plots/figureMAPS.png', height=10, width=13, units = 'in', res=300)
+  ggarrange(pMa,pMb, heights = c(1,1), labels = c('a', 'b'), ncol = 1, nrow = 2)
+  dev.off()
+}
+figureMAPS()
+
+
+#Only norfs
+ordering_nORF_csq = c('non-coding', 'synonymous', 'missense', 'stop lost', 'stop gained', 'essential splice')
+
+exomesOnly = load_maps_data(data_type = 'exomes', type = "onlynorfs") %>% 
+  mutate(nORF_csq=fct_relevel(nORF_csq, ordering_nORF_csq))
+genomesOnly = load_maps_data(data_type = 'genomes', type = "onlynorfs") %>% 
+  mutate(nORF_csq=fct_relevel(nORF_csq, ordering_nORF_csq))
+
+#Basic plot
+exomesOnlyPlot <- ggplot(exomesOnly) + aes(x = nORF_csq, y = maps, ymin = maps_lower, ymax = maps_upper, color = "#E69F00") + 
+  geom_pointrange() + 
+  geom_point(size=5) +
+  geom_hline(yintercept = mis_exomes_maps, color = color_mis, linetype = 'dashed') + 
+  geom_hline(yintercept = syn_exomes_maps, color = color_syn, linetype = 'dashed') + 
+  geom_hline(yintercept = nonsense_exomes_maps, color = color_lof, linetype = 'dashed') + 
+  #geom_hline(yintercept = stoplost_exomes_maps, color = color_lof, linetype = 'dashed') + 
+  annotate('text', x = 0.78, y = mis_exomes_maps + 0.007, size = 3, hjust = 1, color = color_mis, label = 'missense') + 
+  annotate('text', x = 0.87, y = syn_exomes_maps + 0.007, size = 3, hjust = 1, color = color_syn, label = 'synonymous') + 
+  annotate('text', x = 0.85, y = nonsense_exomes_maps + 0.007, size = 3, hjust = 1, color = color_lof, label = 'stop gained') + 
+  #annotate('text', x = 0.9, y = stoplost_exomes_maps + 0.007, size = 3, hjust = 1, color = color_lof, label = 'stop lost') + 
+  theme_classic() +
+  ggtitle("Exomes") +
+  theme(plot.title=element_text(size=15, vjust=1, hjust = 0.5)) +
+  xlab("nORF Consequence") + ylab("MAPS Score") +
+  scale_y_continuous(limits = c(-0.07, 0.20), breaks = c(-0.05, 0, 0.05, 0.1, 0.15)) +
+  theme(plot.margin = margin(0, 5.5, 0, 5.5)) +
+  theme(legend.position = "none")
+exomesOnlyPlot
+
+genomesOnlyPlot <- ggplot(genomesOnly) + aes(x = nORF_csq, y = maps, ymin = maps_lower, ymax = maps_upper, color = "#E69F00") + 
+  geom_pointrange() + 
+  geom_point(size=5) +
+  geom_hline(yintercept = mis_genomes_maps, color = color_mis, linetype = 'dashed') + 
+  geom_hline(yintercept = syn_genomes_maps, color = color_syn, linetype = 'dashed') + 
+  geom_hline(yintercept = nonsense_genomes_maps, color = color_lof, linetype = 'dashed') + 
+  #geom_hline(yintercept = stoplost_genomes_maps, color = color_lof, linetype = 'dashed') + 
+  annotate('text', x = 0.78, y = mis_genomes_maps + 0.007, size = 3, hjust = 1, color = color_mis, label = 'missense') + 
+  annotate('text', x = 0.87, y = syn_genomes_maps + 0.007, size = 3, hjust = 1, color = color_syn, label = 'synonymous') + 
+  annotate('text', x = 0.85, y = nonsense_genomes_maps + 0.007, size = 3, hjust = 1, color = color_lof, label = 'stop gained') + 
+  #annotate('text', x = 0.9, y = stoplost_genomes_maps - 0.007, size = 3, hjust = 1, color = color_lof, label = 'stop lost') + 
+  theme_classic() +
+  ggtitle("Genomes") +
+  theme(plot.title=element_text(size=15, vjust=1, hjust = 0.5)) +
+  xlab("nORF Consequence") + ylab("MAPS Score") +
+  scale_y_continuous(limits = c(-0.07, 0.20), breaks = c(-0.05, 0, 0.05, 0.1, 0.15)) +
+  theme(plot.margin = margin(0, 5.5, 0, 5.5)) +
+  theme(legend.position = "none")
+genomesOnlyPlot
+
+figureMAPS_Sup = function() {
+  pMa = exomesOnlyPlot + theme(plot.margin = unit(c(0.1,0.1,1,0.1), "cm")) 
+  pMb = genomesOnlyPlot + theme(plot.margin = unit(c(0.1,0.1,1,0.1), "cm")) 
+  pdf('plots/figureMAPS_Sup.pdf', height=10, width=11)
+  ggarrange(pMa,pMb, heights = c(1,1), labels = c('a', 'b'), ncol = 1, nrow = 2)
+  dev.off()
+  png('plots/figureMAPS_Sup.png', height=10, width=10, units = 'in', res=300)
+  ggarrange(pMa,pMb, heights = c(1,1), labels = c('a', 'b'), ncol = 1, nrow = 2)
+  dev.off()
+}
+figureMAPS_Sup()
+```
+
+
+# 5. Variant Analysis
+
+## Figure 6: Reinterpreting COSMIC, HGMD and ClinVar mutations in the context of nORFs
+```{r}
+#Variant counts
+
+format_vep_category <- function(category_list) {
+  return(category_list %>%
+           gsub("_"," ", .) %>%
+           gsub(" variant", "", .) %>%
+           gsub("non coding transcript exon", "ncRNA", .) %>%
+           gsub(" prime ","'", .))
+}
+
+
+canonicalChosenCsq <- c('missense_variant', 'non_coding_transcript_exon_variant',
+                        'synonymous_variant', 'intron_variant',
+                        '5_prime_UTR_variant', '3_prime_UTR_variant', 'intergenic_variant')
+nORFsChosenCsq <- c('stop_gained', 'stop_lost', 'frameshift_variant')
+
+getCounts <- function(norfVCF, vepVCF, chosenCsq = nORFsChosenCsq) {
+  nORFs <- read_tsv(norfVCF, comment = '#', col_names = F, col_types = 'cccccccccccccc') %>% 
+    dplyr::select(X1, X7) %>% 
+    filter(X7 %in% chosenCsq)
+  vep <- read_tsv(vepVCF, comment = '#', col_names = F, col_types = 'cccccccccccccc') %>% 
+    dplyr::select(X1, X7) %>% 
+    filter(X1 %in% nORFs$X1)
+  joined <- nORFs %>% 
+    left_join(vep, by = "X1") %>% 
+    filter(X7.x %in% nORFsChosenCsq) %>% 
+    filter(X7.y %in% canonicalChosenCsq) %>% 
+    mutate(X7.y = format_vep_category(X7.y)) %>% 
+    mutate(X7.x = format_vep_category(X7.x))
+  colnames(joined) <- c("ID", "nORF_csq", "vep_csq")
+  
+  counts <- summarise(group_by(joined , nORF_csq, vep_csq), counts = n())
+  return(joined)
+}
+
+figure6a <- function() {
+  nORFs <- read_tsv("dataFiles/cosmic/cosmicCoding_norfs.vcf", comment = '#', col_names = F, col_types = 'cccccccccccccc') %>% 
+    dplyr::select(X1, X7) %>% 
+    filter(X7 %in% nORFsChosenCsq)
+  nORFs2 <- read_tsv("dataFiles/cosmic/cosmicNonCoding_norfs.vcf", comment = '#', col_names = F, col_types = 'cccccccccccccc') %>% 
+    dplyr::select(X1, X7) %>% 
+    filter(X7 %in% nORFsChosenCsq) %>% 
+    bind_rows(nORFs)
+  vep <- read_tsv("dataFiles/cosmic/cosmicCoding_vep.vcf", comment = '#', col_names = F, col_types = 'cccccccccccccc') %>% 
+    dplyr::select(X1, X7) %>% 
+    filter(X1 %in% nORFs2$X1)
+  vep2 <- read_tsv("dataFiles/cosmic/cosmicNonCoding_vep.vcf", comment = '#', col_names = F, col_types = 'cccccccccccccc') %>% 
+    dplyr::select(X1, X7) %>% 
+    filter(X1 %in% nORFs2$X1) %>% 
+    bind_rows(vep)
+  subtypes <- read_tsv("dataFiles/cosmic/CosmicCodingSubtypes.tsv", comment = '#', col_names = c("PrimarySite", "PrimaryHistology", "ID"), col_types = 'ccc') %>% 
+    filter(ID %in% nORFs2$X1) %>% 
+    select(PrimarySite, ID)
+  subtypes2 <- read_tsv("dataFiles/cosmic/CosmicNonCodingSubtypes.tsv", comment = '#', col_names = c("PrimarySite", "ID"), col_types = 'cc') %>% 
+    filter(ID %in% nORFs2$X1) %>% 
+    bind_rows(subtypes)
+  joined <- nORFs2 %>% 
+    left_join(vep2, by = "X1") %>% 
+    filter(X7.x %in% nORFsChosenCsq) %>% 
+    filter(X7.y %in% canonicalChosenCsq) %>% 
+    mutate(X7.y = format_vep_category(X7.y)) %>% 
+    mutate(X7.x = format_vep_category(X7.x))
+  colnames(joined) <- c("ID", "nORF_csq", "vep_csq")
+  
+  variantsSubtyped <- joined %>% 
+    left_join(subtypes2) %>% 
+    filter(PrimarySite != "NS")
+  
+  subtypesBelow1000 <- summarise(group_by(variantsSubtyped, PrimarySite), counts = n()) %>% 
+    filter(counts < 4000) 
+  
+  variantsSubtypedCondensed <- variantsSubtyped %>% 
+    mutate(PrimarySite = ifelse(PrimarySite %in% subtypesBelow1000$PrimarySite, "other", PrimarySite))
+  
+  counts <- summarise(group_by(variantsSubtypedCondensed , nORF_csq, vep_csq, PrimarySite), counts = n()) %>% 
+    mutate(PrimarySite = str_replace(PrimarySite, "haematopoietic_and_lymphoid_tissue", "haematopoietic/lymphoid")) %>% 
+    mutate(PrimarySite = str_replace(PrimarySite, "_", " ")) %>% 
+    filter(vep_csq != "intergenic")
+  
+  cosmicPlot <- ggplot(data = counts, aes(axis1 = PrimarySite, axis2 = vep_csq, axis3 = nORF_csq, y = counts)) +
+    scale_x_discrete(limits = c("PrimarySite","vep csq", "nORF csq" )) +
+    scale_y_continuous(label=comma) +
+    geom_alluvium(aes(fill = nORF_csq)) +
+    geom_stratum() + geom_text(stat = "stratum", label.strata = TRUE) +
+    geom_label(stat = "stratum", aes(label=ifelse(vep_csq == 'intron', vep_csq,NA))) +
+    geom_label(stat = "stratum", aes(label=ifelse(PrimarySite == "haematopoietic/lymphoid" , PrimarySite,NA))) +
+    theme_minimal() +
+    ylab("COSMIC variants") +
+    guides(fill=guide_legend(title="nORF csq")) +
+    theme(axis.title = element_text(size = 14), axis.text.x = element_text(size = 14), 
+          axis.text.y = element_text(size = 14))
+  return(cosmicPlot)
+}
+figure6a()
+
+
+figure6b <- function() {
+  hgmdJoined <- getCounts(norfVCF = "dataFiles/hgmd/hgmd_norfs.vcf", vepVCF = "dataFiles/hgmd/hgmd_vep.vcf", chosenCsq = nORFsChosenCsq) %>% 
+    mutate(source = "hgmd")
+  bothJoined <- getCounts(norfVCF = "dataFiles/clinvar/clinvar_norfs.vcf", vepVCF = "dataFiles/clinvar/clinvar_vep.vcf", chosenCsq = nORFsChosenCsq) %>% 
+    mutate(source = "clinvar") %>% 
+    bind_rows(hgmdJoined)
+  
+  bothCounts <- summarise(group_by(bothJoined , nORF_csq, vep_csq, source), counts = n())
+  
+  bothPlot <- ggplot(data = bothCounts, aes(axis1 = source, axis2 = vep_csq, axis3 = nORF_csq, y = counts)) +
+    scale_x_discrete(limits = c("source","vep csq", "nORF csq" )) +
+    geom_alluvium(aes(fill = nORF_csq)) +
+    geom_stratum() + 
+    geom_text(stat = "stratum", label.strata = TRUE) +
+    geom_label(stat = "stratum", aes(label=ifelse(vep_csq %in% c('ncRNA', 'intron'), vep_csq,NA))) +
+    theme_minimal() +
+    ylab("Disease variants") +
+    guides(fill=guide_legend(title="nORF csq")) +
+    theme(axis.title = element_text(size = 14), axis.text.x = element_text(size = 14), 
+          axis.text.y = element_text(size = 14))
+  return(bothPlot)
+}
+figure6b()
+
+figure6 = function() {
+  #p6a = figure6a()
+  p6a = cosmicPlot
+  p6b = figure6b()
+  pdf('plots/figure6.pdf', height=18, width=13)
+  ggarrange(p6a,p6b, nrow = 2, ncol = 1,labels = c('a', 'b'))
+  dev.off()
+  png('plots/figure6.png', height=15, width=15, units = 'in', res=300)
+  ggarrange(p6a,p6b, nrow = 2, ncol = 1,labels = c('a', 'b'))
+  dev.off()
+}
+figure6()
+```
+
+## Sup tables 3 and 4
+```{r variantTables}
+#Tables
+#Use COSMIC function code and then
+cosmicTableCounts <- summarise(group_by(variantsSubtypedCondensed, vep_csq, nORF_csq), counts = n())
+write.table(cosmicTableCounts, "plots/TableS3.txt", sep = '\t', row.names = F, col.names = T, quote = F)
+
+
+hgmdJoined <- getCounts(norfVCF = "dataFiles/hgmd/hgmd_norfs.vcf", vepVCF = "dataFiles/hgmd/hgmd_vep.vcf", chosenCsq = nORFsChosenCsq) %>% 
+  mutate(source = "hgmd")
+bothJoined <- getCounts(norfVCF = "dataFiles/clinvar/clinvar_norfs.vcf", vepVCF = "dataFiles/clinvar/clinvar_vep.vcf", chosenCsq = nORFsChosenCsq) %>% 
+  mutate(source = "clinvar") %>% 
+  bind_rows(hgmdJoined)
+
+bothCounts <- summarise(group_by(bothJoined, vep_csq, nORF_csq), counts = n())
+
+write.table(bothCounts, "plots/TableS4.txt", sep = '\t', row.names = F, col.names = T, quote = F)
+
+
+
+```
+
+## Table 2 (HGMD)
+```{r table1}
+
+chosenCsq <- c('stop_gained', 'stop_lost', 'splice_acceptor_variant', 'splice_donor_variant', 'frameshift_variant')
+
+nORFs <- read_tsv("dataFiles/hgmd/hgmd_norfs.vcf", comment = '#', col_names = F, col_types = 'cccccccccccccc') %>% 
+  dplyr::select(X1, X7) %>% 
+  filter(X7 %in% chosenCsq)
+vep <- read_tsv("dataFiles/hgmd/hgmd_vep.vcf", comment = '#', col_names = F, col_types = 'cccccccccccccc') %>% 
+  dplyr::select(X1, X7) %>% 
+  filter(X1 %in% nORFs$X1)
+joined <- nORFs %>% 
+  left_join(vep, by = "X1") %>% 
+  filter(!(X7.y %in% chosenCsq)) %>% 
+  mutate(X7.y = format_vep_category(X7.y)) %>% 
+  mutate(X7.x = format_vep_category(X7.x))
+colnames(joined) <- c("ID", "nORF_csq", "vep_csq")
+
+hgmdCandidates <- joined %>% 
+  filter(!(vep_csq %in% c("missense", "start lost", "splice region", "inframe insertion", "inframe deletion", "protein altering"))) %>% 
+  filter(!(nORF_csq %in% c("frameshift")))
+
+hgmdVCF <- read_tsv("dataFiles/hgmd/hgmd2019_hg38.vcf", comment = '#', col_names = F, col_types = 'cicccccc') 
+
+hgmdVCFfiltered <- hgmdVCF %>% 
+  filter(X3 %in% hgmdCandidates$ID) %>% 
+  mutate(PHEN = str_remove(str_extract(X8, 'PHEN=".*"'), "PHEN=")) %>% 
+  mutate(PHEN = str_remove_all(PHEN, '"')) %>% 
+  mutate(CLASS = str_remove(str_extract(X8, 'CLASS=[^;]*;'), "CLASS=")) %>% 
+  mutate(GENE = str_remove(str_extract(X8, 'GENE=[^;]*;'), "GENE=")) %>% 
+  mutate(GENE = str_remove(GENE, ";")) %>% 
+  filter(CLASS =="DM;") %>% 
+  mutate(ID = X3) %>% 
+  select(c(X1,X2,ID, PHEN, GENE)) %>% 
+  left_join(hgmdCandidates)
+
+find_nORFs <- hgmdVCF %>% 
+  filter(X3 %in% hgmdVCFfiltered$ID)
+fwrite(find_nORFs, "dataFiles/hgmd/find_nORFs.vcf", col.names = F, quote = F, sep = '\t')
+
+#Ran this code in VEP:
+#sudo docker run -d -t -i -v $HOME/vep_data:/opt/vep/.vep ensemblorg/ensembl-vep ./vep -i /opt/vep/.vep/find_nORFs.vcf -o /opt/vep/.vep/found_norfs.vcf --gtf /opt/vep/.vep/norfs_38.gtf.gz --force_overwrite --fasta /opt/vep/.vep/homo_sapiens/97_GRCh38/Homo_sapiens.GRCh38.dna.toplevel.fa.gz
+
+found_norfs <- read_tsv("dataFiles/hgmd/found_norfs.vcf", comment = '#', col_names = F, col_types = 'cccccccccccccc') %>% 
+  dplyr::filter(X7 %in% c("stop_gained", "stop_lost")) %>% 
+  distinct(X1, .keep_all = T) %>% 
+  select(X1,X4)
+colnames(found_norfs) <- c("ID", "nORF")
+
+hgmdnORFseqs <- readRDS("dataFiles/nORFsDB1.3.rds") %>% 
+  dplyr::filter(id %in% found_norfs$nORF) %>% 
+  select(id, NA.3)
+colnames(hgmdnORFseqs) <- c("nORF", "Length(AA)")
+
+table1 <- hgmdVCFfiltered %>% 
+  left_join(found_norfs, by = "ID") %>% 
+  left_join(hgmdnORFseqs, by = "nORF") %>% 
+  select(c(X1,X2,ID, PHEN, GENE, vep_csq, nORF, nORF_csq, 'Length(AA)'))
+colnames(table1)[1:2] <-c("Chr", "Pos")
+write_tsv(table1, "plots/table2.tsv")
+```
+
+## Table 3 (ClinVar)
+```{r table2}
+
+chosenCsq <- c('stop_gained', 'stop_lost', 'splice_acceptor_variant', 'splice_donor_variant', 'frameshift_variant')
+
+nORFs <- read_tsv("dataFiles/clinvar/clinvar_norfs.vcf", comment = '#', col_names = F, col_types = 'cccccccccccccc') %>% 
+  dplyr::select(X1, X7) %>% 
+  filter(X7 %in% chosenCsq)
+vep <- read_tsv("dataFiles/clinvar/clinvar_vep.vcf", comment = '#', col_names = F, col_types = 'cccccccccccccc') %>% 
+  dplyr::select(X1, X7) %>% 
+  filter(X1 %in% nORFs$X1)
+joined <- nORFs %>% 
+  left_join(vep, by = "X1") %>% 
+  filter(!(X7.y %in% chosenCsq)) %>% 
+  mutate(X7.y = format_vep_category(X7.y)) %>% 
+  mutate(X7.x = format_vep_category(X7.x))
+colnames(joined) <- c("ID", "nORF_csq", "vep_csq")
+
+clinvarCandidates <- joined %>% 
+  filter(!(vep_csq %in% c("missense", "start lost", "splice region", "inframe insertion", "inframe deletion", "protein altering"))) %>% 
+  filter(!(nORF_csq %in% c("frameshift")))
+
+clinvarVCF <- read_tsv("dataFiles/clinvar/clinvar_20190708.vcf", comment = '#', col_names = F, col_types = 'cccccccccccccc') 
+
+clinvarVCFfiltered <- clinvarVCF %>% 
+  filter(X3 %in% clinvarCandidates$ID) %>% 
+  filter(X3 != "624401") %>% 
+  mutate(PHEN = str_remove(str_extract(X8, 'CLNDN=[^;]*;'), "CLNDN=")) %>% 
+  mutate(PHEN = str_remove(PHEN, "not_provided")) %>% 
+  mutate(PHEN = str_remove(PHEN, "|")) %>% 
+  mutate(PHEN = str_remove(PHEN, ";")) %>% 
+  mutate(GENE = str_remove(str_extract(X8, 'GENEINFO=[^;]*:'), "GENEINFO=")) %>% 
+  mutate(GENE = str_remove(GENE, ":")) %>% 
+  mutate(CLNSIG = str_remove(str_extract(X8, 'CLNSIG=[^;]*;'), "CLNSIG=")) %>% 
+  filter(CLNSIG %in% c("Pathogenic/Likely_pathogenic;", "Pathogenic;", "Likely_pathogenic;")) %>% 
+  mutate(ID = X3) %>% 
+  select(c(X1,X2,ID, PHEN, GENE)) %>% 
+  left_join(clinvarCandidates)
+clinvarVCFfiltered$GENE[7] <- "HBB"
+
+find_nORFsClin <- clinvarVCF %>% 
+  filter(X3 %in% clinvarVCFfiltered$ID)
+write_tsv(find_nORFsClin, "dataFiles/clinvar/find_nORFsClin.vcf", col_names = F)
+
+#Ran this code in VEP:
+#sudo docker run -d -t -i -v $HOME/vep_data:/opt/vep/.vep ensemblorg/ensembl-vep ./vep -i /opt/vep/.vep/find_nORFsClin.vcf -o /opt/vep/.vep/found_norfsClin.vcf --gtf /opt/vep/.vep/norfs_38.gtf.gz --force_overwrite --fasta /opt/vep/.vep/homo_sapiens/97_GRCh38/Homo_sapiens.GRCh38.dna.toplevel.fa.gz
+found_norfsClin <- read_tsv("dataFiles/clinvar/found_norfsClin.vcf", comment = '#', col_names = F, col_types = 'cccccccccccccc') %>% 
+  dplyr::filter(X7 %in% c("stop_gained", "stop_lost")) %>% 
+  distinct(X1, .keep_all = T) %>% 
+  select(X1,X4)
+colnames(found_norfsClin) <- c("ID", "nORF")
+
+
+clin_nORFseqs <- readRDS("dataFiles/nORFsDB1.3.rds") %>% 
+  dplyr::filter(id %in% found_norfsClin$nORF) %>% 
+  select(id, NA.3)
+colnames(clin_nORFseqs) <- c("nORF", "Length(AA)")
+
+table2 <- clinvarVCFfiltered %>% 
+  left_join(found_norfsClin, by = "ID") %>% 
+  left_join(clin_nORFseqs, by = "nORF") %>% 
+  select(c(X1,X2,ID, PHEN, GENE, vep_csq, nORF, nORF_csq, 'Length(AA)'))
+colnames(table2)[1:2] <-c("Chr", "Pos")
+write_tsv(table2, "plots/table3.tsv")
+```
+

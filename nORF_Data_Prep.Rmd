@@ -1,0 +1,843 @@
+---
+title: "nORF_Data_Prep"
+author: "Matt Neville"
+date: "12/05/2020"
+output: html_document
+---
+
+The following is a document for processing OpenProt (http://www.openprot.org/) ([Brunet et al., 2018](https://doi.org/10.1093/nar/gky936)) and sorfs.org (http://www.sorfs.org/) ([Olexiouk et al., 2018](https://doi.org/10.1093/nar/gkx1130)) into a human novel open reading frame (nORF) dataset.
+
+Command line steps are given in bash blocks with eval = F so will not run by default. These are provided for replication purposes, exact commands needed may differ by machine.
+
+# 1. Setup and Downloads
+
+## 1a. Load required libraries
+```{r Libraries, include=FALSE}
+library(GenomicRanges)
+library(rtracklayer)
+library(GenomicFeatures)
+library(Biostrings)
+library(tidyverse)
+```
+
+
+## 1b. Download OpenProt entries
+
+The code below downloads and names `.tsv`, `.bed`, and `.fasta` files with the following parameters from OpenProt (http://www.openprot.org/p/download):
+* Release: 1.3
+* Species: Homo Sapiens
+* Assembly: GRCg38.p5
+* Protein Type: AltProts and Isoforms
+* Annotation: Ensembl (GRCh38.83)
+* Supporting Evidence: All predicted
+
+```{bash OpenProt_files, eval = F}
+#TSV file
+wget http://www.openprot.org/download/files/1.3/human-openprot-r1_3-altprots+isoforms-grch38.83.tsv.zip
+unzip human-openprot-r1_3-altprots+isoforms-grch38.83.tsv.zip
+mv human-openprot-r1_3-altprots+isoforms-grch38.83.tsv dataFiles/ensemblOpenProtAllPredicted.tsv
+
+#BED file
+wget http://www.openprot.org/download/files/1.3/human-openprot-r1_3-altprots+isoforms-grch38.83.bed.zip
+unzip human-openprot-r1_3-altprots+isoforms-grch38.83.bed.zip
+mv human-openprot-r1_3-altprots+isoforms-grch38.83.bed dataFiles/ensemblOpenProtAllPredicted_38.bed
+
+#Protein FASTA file
+wget http://www.openprot.org/download/files/1.3/human-openprot-r1_3-altprots+isoforms-grch38.83.fasta.zip
+unzip human-openprot-r1_3-altprots+isoforms-grch38.83.fasta.zip
+mv human-openprot-r1_3-altprots+isoforms-grch38.83.fasta dataFiles/ensemblOpenProtAllPredicted_38.fasta
+
+#Clean up
+rm human-openprot-r1_3-altprots+isoforms-grch38.83.*
+```
+
+
+## 1c: Download sorfs.org entries
+
+The code below downloads files with the following parameters from sorfs.org (http://www.sorfs.org/BioMart):
+* Database: Homo Sapiens
+* Floss Classification: Good, Extreme
+* Main Attributes: Sorf ID, Chromosome, Sorf Start, Sorf End, Strand, Spliced Start Parts, Spliced Stop Parts, Start Codon, Sorf Length, AA sequence, Transcript sequence, Biotype, Annotation, Ensembl Transcript ID
+
+```{bash sorfs_file, eval = F}
+# Main sorfs download used in norfs.org dataset
+wget -O dataFiles/sorfsDownload.txt 'http://biomart.biobix.be/martservice/results?query=<!DOCTYPE Query><Query client="true" processor="TSV" limit="-1" header="1"><Dataset name="BioMart" config="Human"><Filter name="human__classification_104" value="Extreme,Good" filter_list=""/><Attribute name="human__sorf_id_104"/><Attribute name="human__chr_104"/><Attribute name="human__sorf_begin_104"/><Attribute name="human__sorf_end_104"/><Attribute name="human__strand_104"/><Attribute name="human__start_parts_104"/><Attribute name="human__stop_parts_104"/><Attribute name="human__sorf_length_104"/><Attribute name="human__start_codon_104"/><Attribute name="human__aa_seq_104"/><Attribute name="human__biotype_104"/><Attribute name="human__annotation_104"/><Attribute name="human__id_104"/><Attribute name="human__tr_seq_104"/></Dataset></Query>'
+
+# ** Alternative download not part of main pipeline**
+# Optionally, the code below downloads a similar file for sorfs.org entries that also have mass spec evidence from their PRIDE ReSpin pipeline. This can be processed in 2b. with processDataset(dataset = "sorfs_MS")
+# wget -O dataFiles/sorfsDownload_MS.txt 'http://biomart.biobix.be/martservice/results?query=<!DOCTYPE Query><Query client="true" processor="TSV" limit="-1" header="1"><Dataset name="BioMart" config="Human"><Filter name="human__classification_104" value="Extreme,Good" filter_list=""/><Attribute name="human__sorf_id_104"/><Attribute name="human__chr_104"/><Attribute name="human__sorf_begin_104"/><Attribute name="human__sorf_end_104"/><Attribute name="human__strand_104"/><Attribute name="human__start_parts_104"/><Attribute name="human__stop_parts_104"/><Attribute name="human__sorf_length_104"/><Attribute name="human__start_codon_104"/><Attribute name="human__aa_seq_104"/><Attribute name="human__tr_seq_104"/><Attribute name="human__biotype_104"/><Attribute name="human__annotation_104"/><Attribute name="human__id_104"/><Attribute name="ReSpin__file_106"/></Dataset></Query>'
+```
+
+## 1d. Download ensembl GFF file for annotation
+
+This code downloads the ensembl `.gff` file for classifying the novel ORFs:
+```{bash ensembl_file, eval = F}
+#Download and unzip GFF3 file
+wget -O dataFiles/Homo_sapiens.GRCh38.96.gff3.gz ftp://ftp.ensembl.org/pub/release-96/gff3/homo_sapiens/Homo_sapiens.GRCh38.96.gff3.gz
+gunzip dataFiles/Homo_sapiens.GRCh38.96.gff3.gz
+```
+
+
+# 2. Process Files
+
+The following section will create custom BED and GTF files for the nORF dataset. 
+Specifically, this script will:
+ * A) Extract sorfs.org entries and OpenProt entries labelled as 'AltProt' with mass spec AND/OR ribo-seq evidence. These are the entries that qualify as novel ORFs.
+ * B) Remove duplicate entries based on matching genomics coordinates
+ * C) Output subsetted `.gtf` and `.bed` files based on input argument: openprot, openprot2pep, sorfs, sorfsMS, all
+
+
+## 2a. Processing Functions
+These are functions used during part 2b
+
+```{r Proccessing_functions}
+#Functions for processing sorfs and openProt datasets
+processOpenProt <- function(annotation) {
+  #Read in BED, FASTA, and TSV files based on ensembl or refseq
+  
+  if (annotation == "ensembl") {
+    bedFile <- read_tsv("dataFiles/ensemblOpenProtAllPredicted_38.bed", 
+                        col_names = c("chrom", "chromStart", "chromStop", "name", "score", 
+                                      "strand", "thickStart", "thickEnd", "itemRgb", "blockCount","blockSizes", "blockStarts"), 
+                        col_types = "ciiciciicicc") %>% 
+      #Remove a bugged entry
+      filter(name != "IP_296985" | chrom != "chrY")
+    
+    tsvFile <- read_tsv("dataFiles/ensemblOpenProtAllPredicted.tsv", skip = 1, col_types = "ccciddicciicccciiddcccd")
+    proteinFasta <- readAAStringSet("dataFiles/ensemblOpenProtAllPredicted_38.fasta") 
+  } else if (annotation == "refseq") {
+    
+    bedFile <- read_tsv("dataFiles/refseqOpenProtAllPredicted_38.bed", 
+                        col_names = c("chrom", "chromStart", "chromStop", "name", "score", 
+                                      "strand", "thickStart", "thickEnd", "itemRgb", "blockCount","blockSizes", "blockStarts"), 
+                        col_types = "ciiciciicicc") 
+    
+    tsvFile <- read_tsv("dataFiles/refseqOpenProtAllPredicted.tsv", skip = 1, col_types = "ccciddicciicccciiddcccd")
+    proteinFasta <- readAAStringSet("dataFiles/refseqOpenProtAllPredicted_38.fasta")     
+  }
+  
+  #Get IDs for subsets of interest
+  #Also filters out some altProts that are isoforms on other transcripts and therefore unlikely to be true nORFs
+  IDaltEvidence <- tsvFile %>% 
+    filter(`protein type` == "AltProt" & (`MS score` != 0 | `TE score` != 0)) %>% 
+    filter(!grepl('II', `protein accession (others)`)) %>% 
+    dplyr::select(`protein accession numbers`) %>% 
+    distinct()
+  
+  #Dataframe with AA seq
+  dfp <- data.frame(str_split(names(proteinFasta), "\\|", simplify = T)[,1], paste(proteinFasta))
+  colnames(dfp) <- c("name", "aaSeq")
+  
+  #Create table formatted consistently with sorfs (effectively bed12 format + extra info)
+  openProtTable <- bedFile %>% 
+    filter(name %in% IDaltEvidence$`protein accession numbers`) %>% 
+    mutate(source = "openprot.org") %>% 
+    left_join(dfp, by = "name") %>%
+    mutate(startCodon = "ATG")
+  openProtTable <- openProtTable %>% 
+    mutate(length = str_length(aaSeq))
+  
+  return(openProtTable)
+}
+
+processSorfs <- function(dataset = "sorfs") {
+  #Read in TXT file
+  if (dataset == "sorfsMS") {
+    rawFile <- read_tsv("dataFiles/sorfsDownload_MS.txt", col_types = 'cciiccciccccccc')
+  } else {
+    rawFile <- read_tsv("dataFiles/sorfsDownload.txt", col_types = 'cciicccicccccc')
+  }
+  #Remove duplicates based on identical Chr, start, stop, strand, AND AAseq
+  rawFile <- rawFile %>%
+    distinct(Chromosome, `Sorf start`, `Sorf end`, Strand, `AA-sequence` , .keep_all = TRUE) %>%
+    filter(`Sorf start` >= 0) %>% 
+    mutate(`AA-sequence` = str_remove(`AA-sequence`, "\\*"))
+  
+  #Convert splice info from sorfs.org into usable bed12 format
+  #First deal with simple no splice cases
+  noSplice <- rawFile %>%
+    filter(is.na(`Spliced start parts`)) %>%
+    mutate(blockCount = "1",
+           blockSizes = `Sorf end` - (`Sorf start` - 1),
+           blockStarts = "0")
+  #Cases with splicing
+  spliced <- rawFile %>%
+    filter(!is.na(`Spliced start parts`))
+  
+  blockCounter <- function(sorf) {
+    blockCount <- length(str_split(sorf[6], "_", simplify = T))
+    return(blockCount)
+  }
+  blockSizer <- function(sorf) {
+    starts <- as.numeric(str_split(sorf[6], "_", simplify = T)) - as.numeric(sorf[3]) - 1
+    ends <- as.numeric(str_split(sorf[7], "_", simplify = T)) - as.numeric(sorf[3])
+    blockSizes <- paste((ends - starts), collapse = ",")
+    return(blockSizes)
+  }
+  blockStarter <- function(sorf) {
+    starts <- as.numeric(str_split(sorf[6], "_", simplify = T)) - as.numeric(sorf[3])
+    blockStarts <- paste(starts, collapse = ",")
+    return(blockStarts)
+  }
+  
+  spliced <- spliced %>% 
+    mutate(blockCount = apply(spliced, 1, blockCounter),
+           blockSizes = apply(spliced, 1, blockSizer),
+           blockStarts = apply(spliced, 1, blockStarter))
+  
+  #Join back together
+  sorfsSpliceFormatted <- rbind(noSplice, spliced)
+  
+  #Deal with similar sorfs by selecting longest when having the same end site + splice count
+  
+  sorfsPlus <- sorfsSpliceFormatted %>%
+    filter(Strand == '1') %>% 
+    arrange(Chromosome,`Sorf end`, `Sorf start`) %>%
+    distinct(Chromosome,`Sorf end`, blockCount, .keep_all = T)
+  
+  sorfsMinus <- sorfsSpliceFormatted %>% 
+    filter(Strand == '-1') %>% 
+    arrange(Chromosome, `Sorf start`, -`Sorf end`) %>%
+    distinct(Chromosome,  `Sorf start`, blockCount, .keep_all = T)
+  
+  sorfsJoined <- bind_rows(sorfsPlus, sorfsMinus) %>% 
+    arrange(Chromosome, `Sorf start`, `Sorf end`) %>% 
+    #Remove a set of ~100 incorrectly annotated splice sites
+    filter(substr(blockStarts, 1, 1) == "0")
+  
+  #Create table formatted consistently with openProt (effectively bed12 format + extra info)
+  sorfsTable <- tibble(
+    chrom = paste0("chr", sorfsJoined$Chromosome),
+    chromStart = sorfsJoined$`Sorf start` - 1,
+    chromStop = sorfsJoined$`Sorf end`,
+    name = gsub(":", "_", sorfsJoined$`Sorf ID`),
+    score = 0,
+    strand = gsub("1", "+", gsub("-1", "-", sorfsJoined$Strand)),
+    thickStart = sorfsJoined$`Sorf start` - 1,
+    thickEnd = sorfsJoined$`Sorf end`,
+    itemRgb = "0,0,0",
+    blockCount = as.integer(sorfsJoined$blockCount),
+    blockSizes = sorfsJoined$blockSizes,
+    blockStarts = sorfsJoined$blockStarts,
+    source = "sorfs.org",
+    aaSeq = sorfsJoined$`AA-sequence`,
+    startCodon = sorfsJoined$`Start codon`,
+    length = sorfsJoined$`Sorf length`)
+  return(sorfsTable)
+}
+
+processPseudogenes <- function() {
+  bedFile <- read_tsv("dataFiles/pseudogenes.bed", col_names = c("chrom", "chromStart", "chromStop", "name", "score", "strand", 
+                                                                 "thickStart", "thickEnd", "itemRgb", "blockCount","blockSizes", 
+                                                                 "blockStarts"), 
+                      col_types = "ciiciciicicc")
+  pseudogeneTable <- bedFile %>% 
+    mutate(source = "pseudogenes_Xu2016") %>% 
+    mutate(aaSeq = NA) %>% 
+    mutate(startCodon = 'ATG') %>% 
+    mutate(length = NA)
+  return(pseudogeneTable)
+}
+
+combineNovelORFs <- function(sorfs,openprot,pseudogenes) {
+  #Bind and remove duplcates between datasets
+  merged <- bind_rows(sorfs,openprot,pseudogenes) %>% 
+    arrange(chrom, chromStart, chromStop, source) %>% 
+    distinct(chrom, chromStart, chromStop, aaSeq, .keep_all = T)
+  
+  #Deal with similar orfs by selecting longest when having the same end site + splicing
+  plusStrand <- merged %>%
+    filter(strand == '+') %>% 
+    arrange(chrom, chromStop, chromStart, source) %>%
+    distinct(chrom, chromStop, blockCount, .keep_all = T)
+  
+  minusStrand <- merged %>% 
+    filter(strand == '-') %>% 
+    arrange(chrom, chromStart, -chromStop) %>%
+    distinct(chrom, chromStart, blockCount, .keep_all = T)
+  
+  strandsJoined <- bind_rows(plusStrand, minusStrand) %>% 
+    arrange(chrom, chromStart, chromStop)
+  return(strandsJoined)
+}
+
+addIDs <- function(novelORFtable) {
+  idKey <- readRDS("dataFiles/nORFsDB1.3.rds") %>% 
+    mutate(mergeKey = str_c(start, end, name)) %>% 
+    dplyr::select(mergeKey, id)
+  novelORFtableMerge <- novelORFtable %>% 
+    mutate(mergeKey = str_c((chromStart +1),chromStop, name)) %>% 
+    left_join(idKey, by = "mergeKey") %>% 
+    mutate(name = ifelse(str_detect(name, "psH"), name, id)) %>% 
+    dplyr::select(-id, mergeKey) %>% 
+    filter(!(is.na(name)))
+  return(novelORFtableMerge)
+}
+
+createBed12 <- function(novelORFtable) {
+  return(novelORFtable[,1:12])
+}
+
+createGTF <- function(novelORFtable) {
+  gtfFile <- tibble(
+    seqname = gsub("chr", "", novelORFtable$chrom),
+    source = novelORFtable$source,
+    feature = "gene",
+    start = novelORFtable$chromStart + 1,
+    end = novelORFtable$chromStop,
+    score = ".",
+    strand = novelORFtable$strand,
+    frame = ".",
+    attributes = paste0('gene_id "', novelORFtable$name,'"; AA_seq "', novelORFtable$aaSeq,
+                        '"; start_codon "', novelORFtable$startCodon, '"; sorf_length "', novelORFtable$length,'";' ))
+  return(gtfFile)
+}
+
+```
+
+## 2b. Processing Code
+
+Here we show the code for the whole norfs dataset but could change to specifically OpenProt or sorfs at this point
+```{r proccssingCode}
+
+#Function calls appropriate functions from 'processingFunctions.R' based on supplied argument
+processDataset <- function(dataset) {
+  if (dataset == "openprotEnsembl") {
+    openprot <- processOpenProt(annotation = "ensembl")
+    return(openprot)
+  } else if (dataset == "openprotRefseq") {
+    openprotRefseq <- processOpenProt(annotation = "refseq")
+    return(openprotRefseq)
+  } else if (dataset == "sorfs") {
+    sorfs <- processSorfs()
+    return(sorfs)
+  } else if (dataset == "pseudogenes") {
+    pseudogenes <- processPseudogenes()
+    return(pseudogenes)
+  } else if (dataset == "sorfsMS") {
+    sorfsMS <- processSorfs(dataset = "sorfsMS")
+    return(sorfsMS)
+  } else if (dataset == "all") {
+    openprot <- processOpenProt(annotation = "ensembl")
+    sorfs <- processSorfs()
+    pseudogenes <- processPseudogenes()
+    combined <- combineNovelORFs(sorfs,openprot,pseudogenes)
+    return(combined)
+  }}
+
+novelORFtableOriginal <- processDataset(dataset = "all")
+
+novelORFtableNamed <- addIDs(novelORFtableOriginal)
+
+#Convert to bed12 and write out
+novelORFbed <- createBed12(novelORFtableNamed) 
+write_tsv(novelORFbed, path = paste0("all","_38.bed"), col_names = F)
+
+#Convert to gtf and write out
+novelORFgtf <- createGTF(novelORFtableNamed)
+write.table(novelORFgtf, paste0("all","_38.gtf"), col.names = F, row.names = F, sep = "\t", quote = F)
+
+```
+
+# 3. Classify Entries
+
+This section classifies the combined OpenProt and sorfs.org entries by their transcript type/relation to annotated protein coding regions.
+
+## 3a. Convert from bed 12 format to bed 6
+
+**Note**: This code requires bedtools to be installed and in your PATH.
+```{bash bed12tobed6, eval = F}
+#Create bed6 file
+bedtools bed12tobed6 -i all_38.bed > dataFiles/all_38.6.bed
+```
+
+## 3b. Classifying Functions
+```{r classifyingFunctions}
+# 3 Functions from old version of R package Guitar that covert bed12 directly to granges
+BED12toGRangesList <- function(filepath, header=FALSE) {
+  
+  # message
+  print("Converting BED12 to GRangesList")
+  print("It may take a few minutes")
+  
+  # read bed file
+  a = read.table(filepath,sep="\t",header=header,stringsAsFactors =FALSE)
+  # mcols_info =a[,13:length(a[1,])]
+  a = a[,1:12]
+  
+  # get transcripts
+  no_tx = length(a[,1])
+  tx_id = 1:no_tx;
+  tx_name = paste("line_",1:no_tx,sep="")
+  tx_chrom = a[,1]
+  tx_strand = a[,6]
+  tx_start = a[,2]+1
+  tx_end = a[,3]
+  transcripts= data.frame(tx_id,tx_name,tx_chrom,tx_strand,tx_start,tx_end)
+  head(transcripts)
+  
+
+  
+  # get genes
+  tx_name = tx_name
+  gene_id = as.character(a[,4])
+  gene_id[is.na(gene_id)]="NA"
+  gene=data.frame(tx_name,gene_id)
+  
+  # 
+  splicing <- lapply(1:no_tx, .spliceSingleTrans, a=a, tx_start=tx_start)
+  splicing <- .combineListOfSplicing(splicing)
+  
+  # make txdb
+  peaks = suppressWarnings(
+    makeTxDb(transcripts=transcripts, 
+             splicings=splicing,
+             genes=gene))
+  
+  # generate GRangesList
+  tx <- exonsBy(peaks, "tx",use.names=TRUE)
+  mcols(tx) <- a
+  
+  return(tx)
+}
+
+.combineListOfSplicing <- function(t){
+  
+  a <- paste("t[[",1:length(t),"]]", sep="")
+  a <- paste(a,collapse =",")
+  a <- paste("rbind(",a,")",sep="")
+  c <- parse(text=a)
+  b <- suppressWarnings(eval(c))
+  
+  return(b)
+}
+
+.spliceSingleTrans <- function(i,a,tx_start) {
+  tx = a[i,]
+  tx_id = i
+  exon_rank=1:as.integer(tx[10])
+  
+  # get start
+  temp = as.integer(strsplit(as.character(tx[12]), ",")[[1]]) + tx_start[i]
+  exon_start=temp
+  
+  # get end
+  temp = as.integer(strsplit(as.character(tx[11]), ",")[[1]])
+  temp2 = temp + exon_start - 1
+  exon_end=temp2
+  
+  # get CDS
+  cds_start = exon_start
+  cds_end = exon_end
+  
+  # get data frame
+  splicing_tx = data.frame(tx_id,exon_rank,exon_start,exon_end,cds_start,cds_end)
+  return(splicing_tx)
+}
+
+
+generateTranscriptPairs <- function(transcriptFeature, class, annotationTibble) {
+  #Create subsetted Granges objects
+  nORF_List <- annotationTibble %>%
+    filter(transcriptClass == class)
+  novelORFs <- novelORFs[novelORFs@elementMetadata@listData$V4 %in% nORF_List$novelORF_ID]
+  #Find any and full overlaps
+  anyoverlap <- findOverlaps(novelORFs, transcriptFeature, type = "any")
+  transcriptPairsAnnotation <- tibble(novelORF_ID = novelORFs@elementMetadata@listData$V4[anyoverlap@from],
+                                      transcript_ID = transcriptFeature@partitioning@NAMES[anyoverlap@to],
+                                      transcriptClass = class) %>% 
+    left_join(transcriptTypes, by = "transcript_ID") %>% 
+    mutate(matchCompare = str_c(novelORF_ID, transcript_ID))
+  #Check which ones are also full overlaps
+  fulloverlap <- findOverlaps(novelORFs, transcriptFeature, type = "within")
+  transcriptFullAnnotation <- tibble(novelORF_ID = novelORFs@elementMetadata@listData$V4[fulloverlap@from],
+                                     transcript_ID = transcriptFeature@partitioning@NAMES[fulloverlap@to],
+                                     transcriptClass = class) %>% 
+    mutate(matchCompare = str_c(novelORF_ID, transcript_ID))
+  
+  #Label any matches that are also full matches
+  transcriptPairsAnnotation <- transcriptPairsAnnotation %>% 
+    mutate(isFull = ifelse(transcriptPairsAnnotation$matchCompare %in% transcriptFullAnnotation$matchCompare, T, F)) %>% 
+    dplyr::select(-matchCompare)
+  
+  return(transcriptPairsAnnotation)
+}
+
+
+prioritizeNonCoding <- function(annotationPairs, ranks) {
+  #Label the priority rank of each annotation
+  annotationPairs <- annotationPairs %>% 
+    left_join(ranks, by = "transcriptBiotype")
+  #Sort by full overlaps first and then highest priority rank, then take first top result for each nORF
+  annotationPairs <- annotationPairs %>% 
+    arrange(novelORF_ID, -isFull, rank, transcript_ID) %>% 
+    distinct(novelORF_ID, .keep_all = T) %>% 
+    dplyr::select(-isFull, -rank)
+  
+  return(annotationPairs)
+}
+
+prioritizeCodingIntrons <- function(annotationPairs) {
+  #Sort by full overlaps, then take first top result for each nORF
+  annotationPairs <- annotationPairs %>% 
+    arrange(novelORF_ID, -isFull, transcript_ID) %>% 
+    distinct(novelORF_ID, .keep_all = T) %>% 
+    dplyr::select(-isFull) 
+  
+  return(annotationPairs)
+}
+
+prioritizeCoding <- function(annotationPairs, ranks) {
+  #Label the priority rank of each annotation
+  annotationPairs <- annotationPairs %>% 
+    left_join(ranks, by = "ORFannotation")
+  #Sort by full overlaps first and then highest priority rank, then take first top result for each nORF
+  annotationPairs <- annotationPairs %>% 
+    arrange(novelORF_ID, rank, transcript_ID) %>% 
+    distinct(novelORF_ID, .keep_all = T) %>% 
+    dplyr::select(-rank)
+  
+  return(annotationPairs)
+}
+
+
+classifyProteinCoding <- function(annotationPairs, txdb) {
+  #Create features
+  introns <- intronsByTranscript(txdb, use.names = T)
+  cds <- cdsBy(txdb, "tx", use.names = T)
+  utr5 <- fiveUTRsByTranscript(txdb, use.names = T)
+  utr3 <- threeUTRsByTranscript(txdb, use.names = T)
+  
+  annotOverlap <- function(novelORFs, annot, type) {
+    overlap <- findOverlaps(novelORFs, annot, type = type)
+    pairsTibble <- tibble(novelORF_ID = novelORFs@elementMetadata@listData$V4[overlap@from],
+                          transcript_ID = annot@partitioning@NAMES[overlap@to]) %>% 
+      mutate(matchCompare = str_c(novelORF_ID, transcript_ID))
+  }
+  
+  #Find partial and full overlaps with features
+  CDSany <- annotOverlap(novelORFs = novelORFs, annot = cds, type = "any")
+  CDSfull <- annotOverlap(novelORFs = novelORFs, annot = cds, type = "within")
+  UTR5any <- annotOverlap(novelORFs = novelORFs, annot = utr5, type = "any")
+  UTR5full <- annotOverlap(novelORFs = novelORFs, annot = utr5, type = "within")
+  UTR3any <- annotOverlap(novelORFs = novelORFs, annot = utr3, type = "any")
+  UTR3full <- annotOverlap(novelORFs = novelORFs, annot = utr3, type = "within")
+  INTRONany <- annotOverlap(novelORFs = novelORFs, annot = introns, type = "any")
+  
+  #Get comparable column
+  annotationPairs <- annotationPairs %>% 
+    mutate(matchCompare = str_c(novelORF_ID, transcript_ID))
+  
+  #Add feature overlaps for each transcript
+  annotationPairs <- annotationPairs %>% 
+    mutate(CDSany = ifelse(annotationPairs$matchCompare %in% CDSany$matchCompare, T, F)) %>%
+    mutate(CDSfull = ifelse(annotationPairs$matchCompare %in% CDSfull$matchCompare, T, F)) %>%
+    mutate(UTR5any = ifelse(annotationPairs$matchCompare %in% UTR5any$matchCompare, T, F)) %>%
+    mutate(UTR5full = ifelse(annotationPairs$matchCompare %in% UTR5full$matchCompare, T, F)) %>%
+    mutate(UTR3any = ifelse(annotationPairs$matchCompare %in% UTR3any$matchCompare, T, F)) %>%
+    mutate(UTR3full = ifelse(annotationPairs$matchCompare %in% UTR3full$matchCompare, T, F)) %>%
+    mutate(INTRONany = ifelse(annotationPairs$matchCompare %in% INTRONany$matchCompare, T, F)) %>%
+    mutate(ORFannotation = "None") %>% 
+    dplyr::select(-matchCompare)
+  
+  #Use feature overlaps to classify each norf-transcript pair
+  annotationPairs <- annotationPairs %>% 
+    mutate(ORFannotation = ifelse(CDSfull, "cds", ORFannotation)) %>% 
+    mutate(ORFannotation = ifelse(CDSany & UTR5any, "utr5-cds", ORFannotation)) %>% 
+    mutate(ORFannotation = ifelse(CDSany & UTR3any, "cds-utr3", ORFannotation)) %>% 
+    mutate(ORFannotation = ifelse(UTR5full, "utr5", ORFannotation)) %>% 
+    mutate(ORFannotation = ifelse(UTR3full, "utr3", ORFannotation)) %>% 
+    mutate(ORFannotation = ifelse(CDSany & INTRONany & !CDSfull, "cds-intronic", ORFannotation)) %>% 
+    mutate(ORFannotation = ifelse(UTR5any & INTRONany, "utr5-intronic", ORFannotation)) %>% 
+    mutate(ORFannotation = ifelse(UTR3any & INTRONany, "utr3-intronic", ORFannotation)) %>% 
+    mutate(ORFannotation = ifelse(CDSany & !CDSfull & !UTR3any & !UTR5any & !INTRONany, "cds-intergenic", ORFannotation)) %>% 
+    mutate(ORFannotation = ifelse(UTR5any & !UTR5full & !CDSany & !INTRONany, "utr5-intergenic", ORFannotation)) %>% 
+    mutate(ORFannotation = ifelse(UTR3any & !UTR3full & !CDSany & !INTRONany, "utr3-intergenic", ORFannotation)) %>% 
+    dplyr::select(novelORF_ID, transcript_ID, transcriptClass, ORFannotation) %>% 
+    mutate(transcriptBiotype = "protein_coding")
+
+  return(annotationPairs)
+}
+
+groupClasses <- function() {
+  #1. Within a protein coding exon
+  codingOverlaps <-  findOverlaps(novelORFs, proteinCodingExons, type = "within")
+  codingOverlapsIDs <- novelORFs@elementMetadata@listData$V4[unique(codingOverlaps@from)]
+  
+  #2. Within a non coding exon
+  nonCodingOverlaps <- findOverlaps(novelORFs, nonCodingExons, type = "within")
+  nonCodingOverlapsIDs <- novelORFs@elementMetadata@listData$V4[unique(nonCodingOverlaps@from)]
+  
+  #3. Partial overlap of protein coding exon
+  partialCodingOverlaps <-  findOverlaps(novelORFs, proteinCodingExons, type = "any")
+  partialCodingOverlapsIDs <- novelORFs@elementMetadata@listData$V4[unique(partialCodingOverlaps@from)]
+  
+  #4. Partial overlap of non coding exon
+  partialnonCodingOverlaps <- findOverlaps(novelORFs, nonCodingExons, type = "any")
+  partialnonCodingOverlapsIDs <- novelORFs@elementMetadata@listData$V4[unique(partialnonCodingOverlaps@from)]
+  
+  #5. Within an intron of protein coding transcript
+  codingIntronsOverlaps <-  findOverlaps(novelORFs, proteinCodingIntrons, type = "any")
+  codingIntronsOverlapsIDs <- novelORFs@elementMetadata@listData$V4[unique(codingIntronsOverlaps@from)]
+  
+  #6. Within an intron of non-coding transcript
+  nonCodingIntronsOverlaps <- findOverlaps(novelORFs, nonCodingIntrons, type = "any")
+  nonCodingIntronsOverlapsIDs <- novelORFs@elementMetadata@listData$V4[unique(nonCodingIntronsOverlaps@from)]
+  
+  
+  #Create tibble for annotating each novel ORF
+  annotationMaster <- tibble(novelORF_ID = novelORFs@elementMetadata@listData$V4,
+                             transcript_ID = NA,
+                             transcriptClass = NA,
+                             transcriptBiotype = NA,
+                             ORFannotation = NA) %>% 
+    #Defaults intergenic
+    mutate(transcriptClass = "intergenic") %>% 
+    #Overwrite if non-coding intronic
+    mutate(transcriptClass = ifelse(novelORF_ID %in% nonCodingIntronsOverlapsIDs, "intronic_ncTranscript", transcriptClass)) %>% 
+    #Overwrite if coding intronic
+    mutate(transcriptClass = ifelse(novelORF_ID %in% codingIntronsOverlapsIDs, "intronic_codingTranscript", transcriptClass)) %>% 
+    #Overwrite if partial non-coding transcript exonic
+    mutate(transcriptClass = ifelse(novelORF_ID %in% partialnonCodingOverlapsIDs, "non_coding", transcriptClass)) %>% 
+    #Overwrite if partial coding transcript exonic
+    mutate(transcriptClass = ifelse(novelORF_ID %in% partialCodingOverlapsIDs, "protein_coding", transcriptClass)) %>% 
+    #Overwrite if full non-coding transcript exonic
+    mutate(transcriptClass = ifelse(novelORF_ID %in% nonCodingOverlapsIDs, "non_coding", transcriptClass)) %>% 
+    #Overwrite if full coding transcript exonic
+    mutate(transcriptClass = ifelse(novelORF_ID %in% codingOverlapsIDs, "protein_coding", transcriptClass))
+  return(annotationMaster)
+}
+
+classify_nORFs <- function(annotationTibble, txdbInput) {
+  annotationTibble2 <- annotationTibble %>% 
+    mutate(ORFannotation = ifelse(transcriptClass == "intergenic", "intergenic", ORFannotation))
+  
+  ncIntronsPairs <- generateTranscriptPairs(transcriptFeature = nonCodingIntrons, class = "intronic_ncTranscript", annotationTibble = annotationTibble2)
+  annotation_ncIntrons <- prioritizeNonCoding(annotationPairs = ncIntronsPairs, ranks = ncAnnotationRank) %>% 
+    mutate(ORFannotation = "intronic")
+  
+  codingIntronsPairs <- generateTranscriptPairs(transcriptFeature = proteinCodingIntrons, class = "intronic_codingTranscript", annotationTibble = annotationTibble2)
+  annotation_codingIntrons <-  prioritizeCodingIntrons(annotationPairs = codingIntronsPairs) %>% 
+    mutate(ORFannotation = "intronic")
+  
+  nonCodingPairs <- generateTranscriptPairs(transcriptFeature = nonCodingExons, class = "non_coding", annotationTibble = annotationTibble2)
+  annotation_nonCoding <- prioritizeNonCoding(annotationPairs = nonCodingPairs, ranks = ncAnnotationRank) %>%
+    #Annotate as ncRNA, unless it is pseudogenic or antisense
+    mutate(ORFannotation = "ncRNA") %>% 
+    mutate(ORFannotation = ifelse(transcriptBiotype == "antisense", "antisense", ORFannotation)) %>% 
+    mutate(ORFannotation = ifelse(transcriptBiotype == "retained_intron", "retained_intron", ORFannotation)) %>% 
+    mutate(ORFannotation = ifelse(transcriptBiotype == "bidirectional_promoter_lncRNA", "bidirectional_promoter_lncRNA", ORFannotation)) %>% 
+    mutate(ORFannotation = ifelse(transcriptBiotype == "nonsense_mediated_decay", "nmd", ORFannotation)) %>% 
+    mutate(ORFannotation = ifelse(str_detect(transcriptBiotype, 'pseudogene'), "pseudogene", ORFannotation)) 
+  
+  proteinCodingPairs <- generateTranscriptPairs(transcriptFeature = proteinCodingExons, class = "protein_coding", annotationTibble = annotationTibble2)
+  proteinCodingPairsDetailed <- classifyProteinCoding(annotationPairs = proteinCodingPairs, txdb = txdbInput)
+  annotation_coding <- prioritizeCoding(annotationPairs = proteinCodingPairsDetailed, ranks = proteinCodingAnnotationRank)
+  
+  
+  annotationCombined <- annotationTibble2 %>% 
+    filter(transcriptClass == "intergenic") %>% 
+    bind_rows(annotation_ncIntrons) %>% 
+    bind_rows(annotation_codingIntrons) %>% 
+    bind_rows(annotation_nonCoding) %>% 
+    bind_rows(annotation_coding)
+  
+  return(annotationCombined)
+}
+
+#Get IDs of all nORFs in frame with a coding exon
+generateInFrameIDs <- function(gffFile, bed6File, txdb) {
+  gff0 = read_tsv(gffFile, comment = "#", col_names = F, col_types = 'ccccccccc') 
+  gff <- gff0 %>% 
+    filter(X3 == "exon") %>% 
+    separate(X9, sep = ";", c("a", "b","c","d","e","f","g","h")) %>% 
+    dplyr::select(b,e,d, X7) 
+  
+  colnames(gff) <- c("exon_ID", "start_phase", "end_phase", "strand")
+  gff <- gff %>% 
+    mutate(exon_ID = str_remove(exon_ID, "Name=")) %>% 
+    mutate(end_phase = str_remove(end_phase, "ensembl_end_phase=")) %>% 
+    mutate(start_phase = str_remove(start_phase, "ensembl_phase=")) 
+  
+  bed0 = read_tsv(bed6File, col_names = F, col_types = 'ciiccc') 
+  bedFirstExonPlus <-  bed0 %>% 
+    filter(X6 == "+") %>% 
+    arrange(X1, X2) %>% 
+    distinct(X1, X4, .keep_all = T)
+  bedFirstExonMinus <- bed0 %>% 
+    filter(X6 == "-") %>% 
+    arrange(X1, -X3) %>% 
+    distinct(X1,X4, .keep_all = T)
+  bedFirstExon <- bedFirstExonPlus %>% 
+    bind_rows(bedFirstExonMinus) %>% 
+    arrange(X1, X2)
+  write_tsv(bedFirstExon, "dataFiles/all_38_firstExon.6.bed", col_names = F)
+  
+  exonsAll <- exons(txdb, use.names=T)
+  
+  novelORFsExons <- import.bed("dataFiles/all_38_firstExon.6.bed")
+  novelORFsExons <- renameSeqlevels(novelORFsExons, gsub("chr","", seqlevels(novelORFsExons)))
+  
+  inFrame <- findOverlaps(novelORFsExons, exonsAll, type = "any")
+  
+  inFrameTibble <- tibble(norf_ID = novelORFsExons@elementMetadata@listData$name[inFrame@from],
+                          norfStart = novelORFsExons@ranges@start[inFrame@from],
+                          norfEnd = novelORFsExons@ranges@start[inFrame@from] + novelORFsExons@ranges@width[inFrame@from] - 1, 
+                          exon_ID = exonsAll@ranges@NAMES[inFrame@to],
+                          exonStart = exonsAll@ranges@start[inFrame@to],
+                          exonEnd =  exonsAll@ranges@start[inFrame@to] + exonsAll@ranges@width[inFrame@to] - 1)  %>% 
+    left_join(gff, by = "exon_ID") %>% 
+    filter(end_phase != "-1" | start_phase != "-1") 
+  
+  #Add reading frames for + strand
+  inFrameNorfsPlus <- inFrameTibble %>% 
+    filter(strand == "+") %>% 
+    mutate(norfFrame = norfStart %% 3) %>%
+    #If exon has start_phase -1 then shift based on end phase
+    #Else shift based on start phase
+    mutate(exonFrame = ifelse(start_phase == "-1", (exonEnd - as.integer(end_phase) + 1) %% 3, (exonStart - as.integer(start_phase)) %% 3)) %>% 
+    filter(exonFrame == norfFrame) %>% 
+    distinct(norf_ID)
+  
+  inFrameNorfsMinus <- inFrameTibble %>% 
+    filter(strand == "-") %>% 
+    mutate(norfFrame = norfEnd %% 3) %>%
+    #If exon has end_phase -1 then shift based on start phase
+    #Else shift based on end phase
+    mutate(exonFrame = ifelse(start_phase == "-1", (exonStart + as.integer(end_phase) - 1) %% 3, (exonEnd + as.integer(start_phase)) %% 3)) %>% 
+    filter(exonFrame == norfFrame) %>% 
+    distinct(norf_ID)
+  
+  inFrameNorf_IDs <- inFrameNorfsPlus %>% 
+    bind_rows(inFrameNorfsMinus)
+  
+  cds <- cds(human)
+  cdsOverlap <- findOverlaps(novelORFs, cds)
+  cdsNovelORFs <- novelORFs@elementMetadata@listData$V4[unique(cdsOverlap@from)]
+
+  #Choose only inFrameNorfs that actually overlap cds
+  inFrameNorf_IDs <- inFrameNorf_IDs %>% 
+    filter(norf_ID %in% cdsNovelORFs)
+  
+  return(inFrameNorf_IDs)
+}
+
+#Annotate as coding region nORF if it matches selected transcript types OR overlaps with CDS
+generateCodingRegionIDs <- function(annotationTable, proteinCodingExons) {
+  overlap <- findOverlaps(novelORFs, proteinCodingExons, type = "any")
+  overlapNovelORFs <- novelORFs@elementMetadata@listData$V4[unique(overlap@from)]
+  annotationTable2 <- annotationTable %>% 
+    filter(transcriptClass == "protein_coding" | transcriptClass == "intronic_codingTranscript" | 
+             transcriptBiotype == "nonsense_mediated_decay" | transcriptBiotype == "retained_intron" |
+             transcriptBiotype == "antisense" | novelORF_ID %in% overlapNovelORFs)
+  return(annotationTable2)
+}
+```
+
+## 3c. Classifying Code
+```{r classiyingCode}
+
+##### First load in 3 required data files: txdb, novelORFs and transcript biotype
+#1.Txdb for humans hg38
+human <- makeTxDbFromEnsembl(organism="Homo sapiens",
+                             release=96,
+                             circ_seqs=DEFAULT_CIRC_SEQS,
+                             server="ensembldb.ensembl.org",
+                             username="anonymous", password=NULL, port=0L,
+                             tx_attrib=NULL)
+
+
+#2.Read in novel ORFs list
+novelORFs <- BED12toGRangesList("all_38.bed")
+novelORFs <- renameSeqlevels(novelORFs, gsub("chr","", seqlevels(novelORFs)))
+
+
+#3.Load in transcript biotypes file
+#In process group IG and TR genes into protein coding and re-annotate a few misclassified transcripts
+#Note that transcriptTypes.txt file was generated for the ensembl biomart page with the follwing parameters:
+  #Ensembl Genes 96, Dataset: Human genes(GRCh38.p12), Attributes: Transcript stable ID + Transcript type, Unique results only
+proteinCodingBiotypes <- c("protein_coding","IG_C_gene", "IG_D_gene", "IG_J_gene", "IG_V_gene",
+                           "TR_C_gene", "TR_D_gene", "TR_J_gene", "TR_V_gene")
+transcriptTypes <- read_tsv("dataFiles/transcriptTypes.txt", col_names = c("transcript_ID", "transcriptBiotype"), skip = 1, col_types = "cc") %>% 
+  mutate(transcriptBiotype = ifelse(transcriptBiotype %in% proteinCodingBiotypes, 'protein_coding', transcriptBiotype)) 
+
+
+##### Set priority ranks for coding and non-coding annotations
+#Priority rank for coding annotations
+proteinCodingAnnotationRank <- tibble(ORFannotation = c("cds", "utr5-cds", "cds-utr3", "utr5", "utr3", "cds-intronic",
+                                                        "utr5-intronic", "utr3-intronic", "cds-intergenic", "utr5-intergenic", "utr3-intergenic", "None"),
+                                      rank = 1:12)
+#Priority rank for non-coding annotations
+ncAnnotationRank <- tibble(
+  transcriptBiotype = c('nonsense_mediated_decay', 'non_stop_decay', 'retained_intron',
+                        'sense_intronic', 'sense_overlapping', '3prime_overlapping_ncrna', 'antisense', 'bidirectional_promoter_lncRNA',
+                        'IG_V_pseudogene', 'IG_C_pseudogene','TR_V_pseudogene', 'rRNA_pseudogene',
+                        'polymorphic_pseudogene', 'translated_unprocessed_pseudogene', 'transcribed_processed_pseudogene',
+                        'transcribed_unprocessed_pseudogene', 'processed_pseudogene', 'unprocessed_pseudogene', 
+                        'unitary_pseudogene', 'transcribed_unitary_pseudogene', 'pseudogene', 'lincRNA', 
+                        'macro_lncRNA', 'snoRNA','Mt_rRNA','Mt_tRNA','miRNA', 'snRNA','misc_RNA','processed_transcript', 'TEC'), 
+  rank = 1:31)
+
+exonsByTranscript <- exonsBy(human, by = "tx", use.names = T)
+intronsByTranscript <- intronsByTranscript(human, use.names = T)
+proteinCodingTranscriptIDs <- transcriptTypes %>% 
+  filter(transcriptBiotype == 'protein_coding')
+proteinCodingExons <- exonsByTranscript[exonsByTranscript@partitioning@NAMES %in% proteinCodingTranscriptIDs$transcript_ID]
+proteinCodingIntrons <- intronsByTranscript[intronsByTranscript@partitioning@NAMES %in% proteinCodingTranscriptIDs$transcript_ID]
+
+nonCodingTranscriptIDs <- transcriptTypes %>%   
+  filter(transcriptBiotype != 'protein_coding') 
+nonCodingExons <- exonsByTranscript[exonsByTranscript@partitioning@NAMES %in% nonCodingTranscriptIDs$transcript_ID]
+nonCodingIntrons <- intronsByTranscript[intronsByTranscript@partitioning@NAMES %in% nonCodingTranscriptIDs$transcript_ID]
+
+#Separate nORFs into five major classes and create tibble for annotating each novel ORF
+#1. Within a protein coding exon
+#2. Within a non coding exon
+#3. Within an intron of protein coding transcript
+#4. Within an intron of non-coding transcript
+#5. None of 1-4 (intergenic)
+annotationClasses <- groupClasses()
+
+#Classify in full detail
+annotationMaster <- classify_nORFs(annotationTibble = annotationClasses, txdbInput = human)
+
+#Label as protein region coding T/F and in-frame with protein coding T/F
+inFrameIDs <- generateInFrameIDs(gffFile = "dataFiles/Homo_sapiens.GRCh38.96.gff3", bed6File = "dataFiles/all_38.6.bed", txdb = human)
+
+codingRegionIDs <- generateCodingRegionIDs(annotationMaster, proteinCodingExons)
+annotationMasterFiltered <- annotationMaster %>% 
+  mutate(inFrame = ifelse(novelORF_ID %in% inFrameIDs$norf_ID, T, F)) %>% 
+  mutate(codingRegion = ifelse(novelORF_ID %in% codingRegionIDs$novelORF_ID, T, F)) %>% 
+  dplyr::select(-transcriptClass) %>% 
+  arrange(novelORF_ID)
+write_tsv(annotationMasterFiltered, "nORFclassification.tsv")
+
+```
+
+## 3d. Removing "in-frame" entries
+This generates the noInFrame files used in all manuscript analyses.
+
+```{r removeInFrame}
+noInFrame_nORFs <- read_tsv("nORFclassification.tsv", col_types = 'ccccll') %>%
+  filter(inFrame == F)
+
+# novelORFtableNamed from section 2b
+noInFrame_nORFs <- novelORFtableNamed %>% 
+  #Remove 28 pseudogenes from Xu et al 2016 that were added to the norfs database but not used in the manuscript analyses
+  filter(source != "pseudogenes_Xu2016") %>% 
+  #Remove in-frame entries
+  filter(name %in% noInFrame_nORFs$novelORF_ID)
+
+#Convert to bed12 and write out
+noInFrame_bed <- createBed12(noInFrame_nORFs) 
+write_tsv(noInFrame_bed, path = "noInFrame_38.bed", col_names = F)
+
+#Convert to gtf and write out
+noInFrame_gtf <- createGTF(noInFrame_nORFs)
+write.table(noInFrame_gtf, "noInFrame_38.gtf", col.names = F, row.names = F, sep = "\t", quote = F)
+ 
+```
+
+
+
+
